@@ -2,11 +2,19 @@
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <sys/errno.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <string.h>
 #include <string>
 #include <unistd.h>
 
 using namespace std;
+
+template <class T>
+void error(T && v) {
+	cout << v;
+	exit(0);
+}
 
 int main(int argc, char *argv[]) {
 	constexpr int socket_family = 41;
@@ -27,6 +35,7 @@ int main(int argc, char *argv[]) {
 	cout << "Socket creating..." << endl;
 	int sock_id = socket(socket_family, socket_type, socket_protocol);
 	cout << "\treturn id is " << sock_id << endl;
+	if (sock_id < 0) return 0;
 
 	if (snd) {
 		string s;
