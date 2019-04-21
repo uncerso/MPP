@@ -9,6 +9,8 @@
 
 #include <linux/string.h>
 
+#include "nc_kernel_module.h"
+
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("uncerso");
 MODULE_DESCRIPTION("NC kernel");
@@ -26,6 +28,29 @@ struct sk_buff * (*ip_make_skb_nc)(struct sock *sk,
 			    struct inet_cork *cork, unsigned int flags) = NULL;
 
 int (*ip_send_skb_nc)(struct net *net, struct sk_buff *skb) = NULL;
+
+static inline struct nchdr *nc_hdr(const struct sk_buff *skb) {
+	return (struct nchdr *)skb_transport_header(skb);
+}
+
+struct handlers * handlers_head = NULL;
+struct states * find_state_record(__u32 prog_id, int state) {
+	struct handlers * hptr = handlers_head;
+	struct states * sptr = NULL;
+	while (hptr) {
+		if (prog_id == hptr->prog_id) {
+			sptr = hptr->state;
+			break;
+		}
+		hptr = hptr->next;
+	}
+	while (sptr) {
+		if (state == sptr->state)
+			break;
+		sptr = sptr->next;
+	}
+	return sptr;
+}
 
 int nc_sock_release(struct socket *sock) {
 	struct sock *sk = sock->sk;
@@ -46,6 +71,15 @@ int nc_sock_release(struct socket *sock) {
 
 char * last_str;
 size_t last_str_size;
+
+void set_hdrs(struct sk_buff *skb, size_t size) {
+	struct nchdr *nch = nc_hdr(skb);
+	__u64 random_number;
+	get_random_bytes_arch(&random_number, sizeof(random_number));
+	skb->ip_summed = CHECKSUM_NONE;
+	nch->total_len = htonl(sizeof(struct nchdr) + size);
+	nch->id = htonl(random_number);
+}
 
 int nc_send(struct socket *sock, struct msghdr *msg, size_t size) {
 	struct sock *sk = sock->sk;
@@ -70,7 +104,6 @@ int nc_send(struct socket *sock, struct msghdr *msg, size_t size) {
 
 	printk(KERN_DEBUG "nc_kernel: nc_send: daddr %u\n", ntohl(daddr));
 	printk(KERN_DEBUG "nc_kernel: nc_send: saddr %u\n", ntohl(saddr));
-
 
 	if (sock_flag(sk, SOCK_LOCALROUTE)) {
 		tos |= RTO_ONLINK;
@@ -106,20 +139,20 @@ int nc_send(struct socket *sock, struct msghdr *msg, size_t size) {
 		}
 		sk_dst_set(sk, dst_clone(&rt->dst));
 	}
-	skb = ip_make_skb_nc(sk, fl4, ip_generic_getfrag, msg, size,
-				0, &ipc, &rt,
+	skb = ip_make_skb_nc(sk, fl4, ip_generic_getfrag, msg, sizeof(struct nchdr)+size,
+				sizeof(struct nchdr), &ipc, &rt,
 				&cork, msg->msg_flags);
 	err = PTR_ERR(skb);
 	printk(KERN_DEBUG "nc_kernel: nc_send: PTR_ERR = %d\n", err);
 
-	skb->ip_summed = CHECKSUM_NONE;
+	set_hdrs(skb, size);
 
 	if (!IS_ERR_OR_NULL(skb)) {
 		err = ip_send_skb_nc(sock_net(sk), skb);
 		printk(KERN_DEBUG "nc_kernel: nc_send: return value of ip_send_skb is %d\n", err);
 	}
 	if (rt) {
-		printk(KERN_DEBUG "nc_kernel: nc_send: rn free\n");
+		printk(KERN_DEBUG "nc_kernel: nc_send: rt free\n");
 		ip_rt_put(rt);
 	}
 	printk(KERN_DEBUG "nc_kernel: nc_send: ok\n");
@@ -127,33 +160,14 @@ int nc_send(struct socket *sock, struct msghdr *msg, size_t size) {
 }
 
 int nc_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
-	void * kdata;
 	struct iovec data;
 	struct inet_sock *inet = inet_sk(sock->sk);
 	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: start\n");
-	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: %08x\n", msg->msg_name);
 
-	inet->inet_saddr = htonl(3232235624); // 192.168.0.104
-	inet->inet_daddr = htonl(3232235624); // 192.168.0.105
+	inet->inet_daddr = htonl(3232235625u); // 192.168.0.105
 
-	if (!iter_is_iovec(&msg->msg_iter)) {
-		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: msg is not an iovec\n");
-		return 0;
-	}
-	
-	data = iov_iter_iovec(&msg->msg_iter);
-	kdata = kmalloc(data.iov_len * sizeof(char), GFP_KERNEL);
-	if (!kdata) {
-		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: kdata = 0\n");
-		return 0;
-	}
-	copy_from_user(kdata, data.iov_base, data.iov_len);
-	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: size = %lu, msg = %s\n", size, (char*)kdata);
 	nc_send(sock, msg, size);
-	swap(last_str, kdata);
-	last_str_size = data.iov_len;
-	if (kdata)
-		kfree(kdata);
+
 	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: ok\n\n");
 	return 0;	
 }
@@ -189,9 +203,9 @@ struct nc_sock {
 };
 
 static struct proto nc_prot = {
-	.name		   = "NC",
-	.owner		   = THIS_MODULE,
-	.obj_size   = sizeof(struct nc_sock),
+	.name		= "NC",
+	.owner		= THIS_MODULE,
+	.obj_size	= sizeof(struct nc_sock),
 };
 
 int nc_sock_create(struct net *net, struct socket *sock, int protocol, int kern) {
@@ -226,9 +240,33 @@ static const struct net_proto_family nc_proto_family = {
 	.owner		= THIS_MODULE,
 };
 
+void update_str(char const * str, size_t size) {
+	void * kdata = kmalloc(size, GFP_KERNEL);
+	if (!kdata) {
+		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: kdata = 0\n");
+		return;
+	}
+	memcpy(kdata, str, size);
+	swap(last_str, kdata);
+	last_str_size = size;
+	if (kdata)
+		kfree(kdata);
+}
+
 int nc_rcv(struct sk_buff *skb) {
 	printk(KERN_DEBUG "nc_kernel: nc_rcv: data received!\n\n");
-	kfree_skb(skb);
+	while(skb) {
+		struct sk_buff * next = skb->next;
+		struct nchdr * nch = nc_hdr(skb);
+		printk(KERN_DEBUG "nc_kernel: nc_rcv: %d\n", skb->len);
+		printk(KERN_DEBUG "nc_kernel: nc_rcv: %d\n", ntohl(nch->total_len));
+		printk(KERN_DEBUG "nc_kernel: nc_rcv: %lu\n", ntohl(nch->id));
+		
+		update_str(skb->data + sizeof(struct nchdr), skb->len - sizeof(struct nchdr));
+
+		kfree_skb(skb);
+		skb = next;
+	}
 	return 0;
 }
 
@@ -259,8 +297,13 @@ static int __init nc_kernel_init(void) {
 
 	err = sock_register(&nc_proto_family);
 	printk(KERN_DEBUG "nc_kernel: init: return value of sock_register is %d\n", err);
-	if (err) return err;
-	
+	if (err) {
+		sock_unregister(PF_NC);
+		err = sock_register(&nc_proto_family);
+		printk(KERN_DEBUG "nc_kernel: init: return value of sock_register (attemption 2) is %d\n", err);
+		if (err)
+			return err;
+	}	
 	err = proto_register(&nc_prot, 1);
 	printk(KERN_DEBUG "nc_kernel: init: return value of proto_register is %d\n", err);
 	if (err) return err;
