@@ -49,15 +49,23 @@ int main(int argc, char *argv[]) {
 			this_thread::sleep_for(1ms);
 		}
 		else {
+			cout << "Received msg\n";
+			cout << "content: " << msg << "\n";
 			if (check_string(msg)) {
+				cout << "first symbol is 'a'\n";
 				shift(msg);
+				cout << "right shift: " << msg << endl;
+				cout << "sending msg\n";
 				int err = send(sock_id, msg, strlen(msg) + 1, 0);
 				if (err == -1) {
 					cout << "sending failed\n";
 					exit(0);
 				}
+				cout << "Successfully sended\n";
 			}
 			else {
+				cout << "the first symbol isn't 'a'\n";
+				cout << "Answer: ";
 				show_result(msg);
 			}
 		}
