@@ -20,3 +20,5 @@ build:
 
 app1_:
 	g++ -Wall -O3 --std=c++17 app1.cpp -o app1
+init_:
+	g++ -Wall -O3 --std=c++17 app1.cpp -o app1

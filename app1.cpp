@@ -12,25 +12,18 @@
 
 using namespace std;
 
-void shift(char* msg)
-{
-	char first = msg[0];
-	for(size_t i = 0; i < strlen(msg); i++)
-		msg[i] = msg[i + 1];
-	msg[strlen(msg) - 1] = first;
+void shift(char* msg) {
+	size_t const size = strlen(msg);
+	for(size_t i = 0; i < size; ++i)
+		msg[i] = msg[i+1];
 }
 
-void show_result(char* msg)
-{
-	cout << msg << endl;
+void show_result(char* msg) {
+	cout << '\t' << msg << endl;
 }
 
-bool check_string(char* msg)
-{
-	if (msg[0] == 'a')
-		return true;
-	else
-		return false;
+bool check_string(char* msg) {
+	return msg[0] == 'a';
 }
 
 int main(int argc, char *argv[]) {
@@ -41,31 +34,32 @@ int main(int argc, char *argv[]) {
 	int sock_id = socket(socket_family, socket_type, socket_protocol);
 	if (sock_id < 0) return 0;
 
-	while(true){
-		char msg[512];
-		memset(msg, 0, sizeof(msg));
+	char msg[512];
+	memset(msg, 0, sizeof(msg));
+	while(true) {
 		int err = recv(sock_id, msg, sizeof(msg), 0);
 		if (err == -1) {
-			this_thread::sleep_for(1ms);
+			this_thread::sleep_for(100ms);
 		}
 		else {
 			cout << "Received msg\n";
-			cout << "content: " << msg << "\n";
+			cout << "\tcontent: " << msg << endl;
 			if (check_string(msg)) {
-				cout << "first symbol is 'a'\n";
+				cout << "\tfirst symbol is 'a'"<< endl;
 				shift(msg);
-				cout << "right shift: " << msg << endl;
-				cout << "sending msg\n";
+				cout << "\tright shift: " << msg << endl;
+				cout << "\t\tsending msg\n";
+				this_thread::sleep_for(100ms);
 				int err = send(sock_id, msg, strlen(msg) + 1, 0);
 				if (err == -1) {
-					cout << "sending failed\n";
+					cout << "\t\tsending failed"<< endl;
 					exit(0);
 				}
-				cout << "Successfully sended\n";
+				cout << "\t\tSuccessfully sended"<< endl;
 			}
 			else {
-				cout << "the first symbol isn't 'a'\n";
-				cout << "Answer: ";
+				cout << "\tthe first symbol isn't 'a'"<< endl;
+				cout << "\tAnswer: "<< endl;
 				show_result(msg);
 			}
 		}
