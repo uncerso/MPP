@@ -35,7 +35,7 @@ static inline struct nchdr *nc_hdr(const struct sk_buff *skb) {
 }
 
 struct id_ip idip = {
-	.ips = {3232235624u, 3232235624u, 3232235624u},
+	.ips = {3232235625u, 3232235624u, 3232235624u},
 };
 
 struct handlers * handlers_head = NULL;
@@ -84,19 +84,12 @@ void set_hdrs(struct sk_buff *skb, size_t size, char const * str_with_hdr) {
 	__u64 random_number;
 	printk(KERN_DEBUG "nc_kernel: set_hdrs: start\n");
 	if (str_with_hdr) {
-		printk(KERN_DEBUG "nc_kernel: set_hdrs: 1\n");
 		memcpy(nch, str_with_hdr, sizeof(struct nchdr));
-		printk(KERN_DEBUG "nc_kernel: set_hdrs: 2\n");
 	} else {
-		printk(KERN_DEBUG "nc_kernel: set_hdrs: 3\n");
 		get_random_bytes_arch(&random_number, sizeof(random_number));
-		printk(KERN_DEBUG "nc_kernel: set_hdrs: 4\n");
 		skb->ip_summed = CHECKSUM_NONE;
-		printk(KERN_DEBUG "nc_kernel: set_hdrs: 5\n");
 		nch->total_len = htonl(sizeof(struct nchdr) + size);
-		printk(KERN_DEBUG "nc_kernel: set_hdrs: 6\n");
 		nch->id = htonl(random_number);
-		printk(KERN_DEBUG "nc_kernel: set_hdrs: 7\n");
 	}
 }
 
@@ -118,23 +111,18 @@ int nc_send(struct socket *sock, struct msghdr *msg, size_t size, char const * s
 	printk(KERN_DEBUG "nc_kernel: nc_send: start\n");
 	
 	ipcm_init_sk(&ipc, inet);
-	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: 1\n");
 	ipc.addr = faddr = daddr;
-	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: 2\n");
 	tos = get_rttos(&ipc, inet);
 
 	printk(KERN_DEBUG "nc_kernel: nc_send: daddr %u\n", ntohl(daddr));
-	printk(KERN_DEBUG "nc_kernel: nc_send: saddr %u\n", ntohl(saddr));
 
 	if (sock_flag(sk, SOCK_LOCALROUTE)) {
 		tos |= RTO_ONLINK;
 		connected = 0;
 	}
-	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: 3\n");
 
 	if (!ipc.oif)
 		ipc.oif = inet->uc_index;
-	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: 4\n");
 
 	if (connected) {
 		printk(KERN_DEBUG "nc_kernel: nc_send: connected\n");
@@ -152,9 +140,7 @@ int nc_send(struct socket *sock, struct msghdr *msg, size_t size, char const * s
 					faddr, saddr, 0, inet->inet_sport,
 					sk->sk_uid);
 		
-		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: 5\n");
 		security_sk_classify_flow(sk, flowi4_to_flowi(fl4));
-		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: 6\n");
 		rt = ip_route_output_flow(net, fl4, sk);
 		if (IS_ERR(rt)) {
 			printk(KERN_DEBUG "nc_kernel: nc_send: rt error\n");
@@ -164,16 +150,13 @@ int nc_send(struct socket *sock, struct msghdr *msg, size_t size, char const * s
 		}
 		sk_dst_set(sk, dst_clone(&rt->dst));
 	}
-	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: 7\n");
 	skb = ip_make_skb_nc(sk, fl4, ip_generic_getfrag, msg, sizeof(struct nchdr)+size,
 				sizeof(struct nchdr), &ipc, &rt,
 				&cork, msg->msg_flags);
-	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: 8\n");
 	err = PTR_ERR(skb);
 	printk(KERN_DEBUG "nc_kernel: nc_send: PTR_ERR = %d\n", err);
 
 	set_hdrs(skb, size, str_with_hdr);
-	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: 9\n");
 
 	if (!IS_ERR_OR_NULL(skb)) {
 		err = ip_send_skb_nc(sock_net(sk), skb);
@@ -211,7 +194,7 @@ int nc_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
 		goto out;
 	}
 
-	mutex_lock(&str_lock);
+	mutex_lock_interruptible(&str_lock);
 	out_str_local = out_str;
 	out_str = NULL;
 	mutex_unlock(&str_lock);
@@ -240,7 +223,7 @@ out:
 int nc_sock_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int flags) {
 	struct iovec data;
 	int out_size;
-	mutex_lock(&str_lock);
+	mutex_lock_interruptible(&str_lock);
 	if (!last_str) {
 		goto out_err;
 	}
@@ -338,7 +321,7 @@ void update_str(char const * str, size_t size) {
 	}
 	memcpy(kdata, str, size);
 
-	mutex_lock(&str_lock);
+	mutex_lock_interruptible(&str_lock);
 	swap(last_str, kdata);
 	last_str_size = size;
 	mutex_unlock(&str_lock);
