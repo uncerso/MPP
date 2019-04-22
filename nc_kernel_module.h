@@ -22,13 +22,17 @@ struct nchdr {
 struct states {
 	struct states * next;
 	__u16	state;
-	int		(*handler)(char * data, size_t size);
+//	int		(*handler)(char * data, size_t size);
 };
 
 struct handlers {
 	struct handlers * next;
 	__u32	prog_id;
 	struct states * state;
+};
+
+struct id_ip {
+	__u32 ips[3];
 };
 
 #endif
