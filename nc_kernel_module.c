@@ -6,6 +6,7 @@
 #include <net/sock.h>
 #include <net/inet_sock.h>
 #include <net/protocol.h>
+#include <linux/mutex.h>
 
 #include <linux/string.h>
 
@@ -34,7 +35,7 @@ static inline struct nchdr *nc_hdr(const struct sk_buff *skb) {
 }
 
 struct id_ip idip = {
-	.ips = {2887219252u, 2887219252u, 2887219252u},
+	.ips = {3232235625u, 3232235624u, 2887219252u},
 };
 
 struct handlers * handlers_head = NULL;
@@ -73,16 +74,17 @@ int nc_sock_release(struct socket *sock) {
 	return 0;
 }
 
+DEFINE_MUTEX(str_lock);
 char * last_str = NULL;
 char * out_str = NULL;
+int last_str_size = 0;
 
-void set_hdrs(struct sk_buff *skb, size_t size) {
+void set_hdrs(struct sk_buff *skb, size_t size, char const * str_with_hdr) {
 	struct nchdr *nch = nc_hdr(skb);
 	__u64 random_number;
-	if (out_str) {
-		memcpy(nc_hdr, out_str, sizeof(struct nchdr));
-		kfree(out_str);
-		out_str = NULL;
+	printk(KERN_DEBUG "nc_kernel: set_hdrs: start\n");
+	if (str_with_hdr) {
+		memcpy(nch, str_with_hdr, sizeof(struct nchdr));
 	} else {
 		get_random_bytes_arch(&random_number, sizeof(random_number));
 		skb->ip_summed = CHECKSUM_NONE;
@@ -91,7 +93,7 @@ void set_hdrs(struct sk_buff *skb, size_t size) {
 	}
 }
 
-int nc_send(struct socket *sock, struct msghdr *msg, size_t size) {
+int nc_send(struct socket *sock, struct msghdr *msg, size_t size, char const * str_with_hdr) {
 	struct sock *sk = sock->sk;
 	struct inet_sock *inet = inet_sk(sk);
 	struct rtable *rt = NULL;
@@ -113,7 +115,6 @@ int nc_send(struct socket *sock, struct msghdr *msg, size_t size) {
 	tos = get_rttos(&ipc, inet);
 
 	printk(KERN_DEBUG "nc_kernel: nc_send: daddr %u\n", ntohl(daddr));
-	printk(KERN_DEBUG "nc_kernel: nc_send: saddr %u\n", ntohl(saddr));
 
 	if (sock_flag(sk, SOCK_LOCALROUTE)) {
 		tos |= RTO_ONLINK;
@@ -123,10 +124,10 @@ int nc_send(struct socket *sock, struct msghdr *msg, size_t size) {
 	if (!ipc.oif)
 		ipc.oif = inet->uc_index;
 
-	if (connected) {
-		printk(KERN_DEBUG "nc_kernel: nc_send: connected\n");
-		rt = (struct rtable *)sk_dst_check(sk, 0);
-	}
+	// if (connected) {
+	// 	printk(KERN_DEBUG "nc_kernel: nc_send: connected\n");
+	// 	rt = (struct rtable *)sk_dst_check(sk, 0);
+	// }
 	
 	if (!rt) {
 		struct net *net = sock_net(sk);
@@ -155,7 +156,7 @@ int nc_send(struct socket *sock, struct msghdr *msg, size_t size) {
 	err = PTR_ERR(skb);
 	printk(KERN_DEBUG "nc_kernel: nc_send: PTR_ERR = %d\n", err);
 
-	set_hdrs(skb, size);
+	set_hdrs(skb, size, str_with_hdr);
 
 	if (!IS_ERR_OR_NULL(skb)) {
 		err = ip_send_skb_nc(sock_net(sk), skb);
@@ -173,25 +174,33 @@ int nc_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
 	struct inet_sock *inet = inet_sk(sock->sk);
 	char * kdata;
 	struct iovec data;
+	char * out_str_local = NULL;
 	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: start\n");
 
 	if (size < 2) {
 		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: msg too small\n");
-		return 0;
+		goto out;
 	}
 
 	if (!iter_is_iovec(&msg->msg_iter)) {
 		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: msg is not an iovec\n");
-		return 0;
+		goto out;
 	}
 
 	data = iov_iter_iovec(&msg->msg_iter);
 	kdata = kmalloc(size, GFP_KERNEL);
 	if (!kdata) {
 		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: kdata = 0\n");
-		return 0;
+		goto out;
 	}
+
+//	mutex_lock_interruptible(&str_lock);
+	out_str_local = out_str;
+	out_str = NULL;
+//	mutex_unlock(&str_lock);
+	
 	copy_from_user(kdata, data.iov_base, size);
+	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: size = %d, str = %s\n", size, kdata);
 
 	if (kdata[size-2] == '!') {
 		inet->inet_daddr = htonl(idip.ips[0]);
@@ -199,25 +208,30 @@ int nc_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
 		inet->inet_daddr = htonl(idip.ips[kdata[size-2]-'0']);
 	} else {
 		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: invalid data\n");
-		return 0;
+		goto out;
 	}
 
-	nc_send(sock, msg, size);
+	nc_send(sock, msg, size, out_str_local);
 
+out:
+	if (out_str_local)
+		kfree(out_str_local);
 	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: ok\n\n");
 	return 0;	
 }
 
 int nc_sock_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int flags) {
 	struct iovec data;
-	size_t out_size;
+	int out_size;
+	// mutex_lock_interruptible(&str_lock);
+	if (!last_str) {
+		goto out_err;
+	}
 	printk(KERN_DEBUG "nc_kernel: nc_sock_recvmsg: start\n");
-	if (!last_str)
-		return -1;
 	
 	if (!iter_is_iovec(&msg->msg_iter)) {
 		printk(KERN_DEBUG "nc_kernel: nc_sock_recvmsg: msg is not an iovec\n");
-		return 0;
+		goto out_ok;
 	}
 	data = iov_iter_iovec(&msg->msg_iter);
 //	printk(KERN_DEBUG "nc_kernel: nc_sock_recvmsg: size = %lu, buf_len = %lu\n", size, data.iov_len);
@@ -226,18 +240,24 @@ int nc_sock_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int fl
 		kfree(out_str);
 	out_str = last_str;
 	last_str = NULL;
-
-	out_size = strlen(out_str) + 1;
+	out_size = last_str_size;
+	last_str_size = 0;
 
 	if (out_size < sizeof(struct nchdr) + 2) {
 		printk(KERN_DEBUG "nc_kernel: nc_sock_recvmsg: BUG detected\n");
-		return -1;
+		printk(KERN_DEBUG "nc_kernel: nc_sock_recvmsg: size = %d\n", last_str_size);
+		goto out_err;
 	}
 
 	copy_to_user(data.iov_base, out_str+sizeof(struct nchdr), min(out_size-sizeof(struct nchdr), size));
 
+out_ok:
+	// mutex_unlock(&str_lock);
 	printk(KERN_DEBUG "nc_kernel: nc_sock_recvmsg: ok\n\n");
 	return 0;
+out_err:
+	// mutex_unlock(&str_lock);
+	return -1;
 }
 
 struct proto_ops nc_proto_ops = {
@@ -294,14 +314,21 @@ static const struct net_proto_family nc_proto_family = {
 
 void update_str(char const * str, size_t size) {
 	char * kdata = kmalloc(size, GFP_KERNEL);
+	printk(KERN_DEBUG "nc_kernel: update_str: updating str...\n");
 	if (!kdata) {
-		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: kdata = 0\n");
+		printk(KERN_DEBUG "nc_kernel: update_str: kdata = 0\n");
 		return;
 	}
 	memcpy(kdata, str, size);
+
+	// mutex_lock_interruptible(&str_lock);
 	swap(last_str, kdata);
+	last_str_size = size;
+	// mutex_unlock(&str_lock);
+
 	if (kdata)
 		kfree(kdata);
+	printk(KERN_DEBUG "nc_kernel: update_str: ok\n\n");
 }
 
 int nc_rcv(struct sk_buff *skb) {
@@ -429,6 +456,7 @@ static void __exit nc_kernel_exit(void) {
 		kfree(last_str);
 	if (out_str)
 		kfree(out_str);
+	mutex_destroy(&str_lock);
 	printk(KERN_DEBUG "nc_kernel: exit: ok\n\n");
 }
 
