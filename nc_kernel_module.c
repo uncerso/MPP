@@ -237,8 +237,8 @@ int nc_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
 	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: st = %x\n", st);
 	if (!st)
 		goto out;
-	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: st->state = %d\n", st->state);
-	inet->inet_daddr = htonl(idip.ips[st->state]);
+	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: st->handler = %d\n", st->handler);
+	inet->inet_daddr = htonl(idip.ips[st->handler]);
 	nc_send(sock, msg, size, out_str_local);
 
 out:
