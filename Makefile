@@ -20,5 +20,9 @@ build:
 
 app1_:
 	g++ -Wall -O3 --std=c++17 app1.cpp -o app1
+app2_:
+	g++ -Wall -O3 --std=c++17 app2.cpp -o app2
+app3_:
+	g++ -Wall -O3 --std=c++17 app2.cpp -o app3
 init_:
-	g++ -Wall -O3 --std=c++17 app1.cpp -o app1
+	g++ -Wall -O3 --std=c++17 init.cpp -o init

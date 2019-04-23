@@ -35,7 +35,7 @@ static inline struct nchdr *nc_hdr(const struct sk_buff *skb) {
 }
 
 struct id_ip idip = {
-	.ips = {3232235625u, 3232235624u, 2887219252u},
+	.ips = {3232235624u, 3232235624u, 3232235624u},
 };
 
 struct handlers * handlers_head = NULL;
@@ -85,12 +85,16 @@ void set_hdrs(struct sk_buff *skb, size_t size, char const * str_with_hdr) {
 	printk(KERN_DEBUG "nc_kernel: set_hdrs: start\n");
 	if (str_with_hdr) {
 		memcpy(nch, str_with_hdr, sizeof(struct nchdr));
+		nch->state = htons(ntohs(nch->state)+1);
 	} else {
 		get_random_bytes_arch(&random_number, sizeof(random_number));
 		skb->ip_summed = CHECKSUM_NONE;
 		nch->total_len = htonl(sizeof(struct nchdr) + size);
 		nch->id = htonl(random_number);
+		nch->state = htons(1);
+		nch->prog_id = htonl(1);
 	}
+
 }
 
 int nc_send(struct socket *sock, struct msghdr *msg, size_t size, char const * str_with_hdr) {
@@ -172,9 +176,12 @@ int nc_send(struct socket *sock, struct msghdr *msg, size_t size, char const * s
 
 int nc_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
 	struct inet_sock *inet = inet_sk(sock->sk);
-	char * kdata;
+//	char * kdata;
 	struct iovec data;
 	char * out_str_local = NULL;
+	struct nchdr * nch;
+	int cur_state = 0;
+	struct states * st;
 	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: start\n");
 
 	if (size < 2) {
@@ -187,30 +194,41 @@ int nc_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
 		goto out;
 	}
 
-	data = iov_iter_iovec(&msg->msg_iter);
-	kdata = kmalloc(size, GFP_KERNEL);
-	if (!kdata) {
-		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: kdata = 0\n");
-		goto out;
-	}
+	// data = iov_iter_iovec(&msg->msg_iter);
+	// kdata = kmalloc(size, GFP_KERNEL);
+	// if (!kdata) {
+	// 	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: kdata = 0\n");
+	// 	goto out;
+	// }
 
 //	mutex_lock_interruptible(&str_lock);
 	out_str_local = out_str;
 	out_str = NULL;
 //	mutex_unlock(&str_lock);
 	
-	copy_from_user(kdata, data.iov_base, size);
-	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: size = %d, str = %s\n", size, kdata);
+	// copy_from_user(kdata, data.iov_base, size);
+	// printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: size = %d, str = %s\n", size, kdata);
 
-	if (kdata[size-2] == '!') {
-		inet->inet_daddr = htonl(idip.ips[0]);
-	} else if ('0' <= kdata[size-2] && kdata[size-2] <= '2') {
-		inet->inet_daddr = htonl(idip.ips[kdata[size-2]-'0']);
-	} else {
-		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: invalid data\n");
-		goto out;
+	// if (kdata[size-2] == '!') {
+	// 	inet->inet_daddr = htonl(idip.ips[0]);
+	// } else if ('0' <= kdata[size-2] && kdata[size-2] <= '2') {
+	// 	inet->inet_daddr = htonl(idip.ips[kdata[size-2]-'0']);
+	// } else {
+	// 	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: invalid data\n");
+	// 	goto out;
+	// }
+
+	if (out_str_local) {
+		nch = (struct nchdr *)out_str_local;
+		cur_state = ntohs(nch->state);
 	}
-
+	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: state = %d\n", cur_state);
+	st = find_state_record(1, cur_state);
+	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: st = %x\n", st);
+	if (!st)
+		goto out;
+	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: st->state = %d\n", st->state);
+	inet->inet_daddr = htonl(idip.ips[st->state]);
 	nc_send(sock, msg, size, out_str_local);
 
 out:
@@ -380,8 +398,8 @@ struct states * make_state(int num) {
 }
 
 static int __init nc_kernel_init(void) {
-	int const sz = 3;
-	int const sts[3] = {0, 0, 0};
+	int const sz = 10;
+	int const sts[] = {0, 2, 1, 1, 2, 0, 1, 2, 0, 1};
 	struct states * sptr = NULL;
 	int err;
 	int i;
