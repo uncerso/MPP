@@ -40,10 +40,12 @@ int main(int argc, char *argv[]) {
 		int err = recv(sock_id, msg, maxlen, 0);
 		if (err != -1) {
 			if (*msg == '!') {
+				cout << "1" << endl;
 				cout << msg+1 << endl;
 				continue;
 			}
 			if (check(*msg) != -1) {
+				cout << "2" << endl;
 				char c = *msg;
 				size_t len = strlen(msg);
 				shift(msg, len);
@@ -52,6 +54,7 @@ int main(int argc, char *argv[]) {
 				if (len == maxlen) continue;
 				++len;
 				msg[len] = c;
+				cout << "3" << endl;
 				send(sock_id, msg, strlen(msg) + 1, 0);
 			}
 		}
