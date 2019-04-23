@@ -212,7 +212,7 @@ int nc_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
 	}
 
 	copy_from_user(kdata, data.iov_base, size);
-	// printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: size = %d, str = %s\n", size, kdata);
+	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: size = %d, str = %s\n", size, kdata);
 	if (kdata[size-2] == '!')
 		last_num = 0;
 	else if ('0' <= kdata[size-2] && kdata[size-2] <= '2') {
@@ -419,7 +419,7 @@ struct states * make_state(int num, int i) {
 
 static int __init nc_kernel_init(void) {
 	int const sz = 19;
-	int const sts[] = {0, 2, 1, 1, 2, 0, 1, 2, 0, 1, 2, 1, 3, 3, 1, 2, 1, 3, 1};
+	int const sts[] = {0, 2, 1, 1, 2, 0, 1, 2, 0, 1, 1, 0, 2, 0, 2, 2, 1, 0, 1};
 	struct states * sptr = NULL;
 	int err;
 	int i;
