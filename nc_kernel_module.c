@@ -389,11 +389,12 @@ struct handlers * make_prog(void) {
 	return tmp;
 }
 
-struct states * make_state(int num) {
+struct states * make_state(int num, int i) {
 	struct states * tmp = kmalloc(sizeof(struct states), GFP_KERNEL);
 	if (!tmp) return NULL;
 	tmp->next = NULL;
-	tmp->state = num;
+	tmp->state = i;
+	tmp->handler = num;
 	return tmp;
 }
 
@@ -410,10 +411,10 @@ static int __init nc_kernel_init(void) {
 		printk(KERN_DEBUG "nc_kernel: init: wtf1\n");
 		return -1;
 	}
-	handlers_head->state = make_state(sts[0]);
+	handlers_head->state = make_state(sts[0], 0);
 	sptr = handlers_head->state;
 	for (i = 1; i < sz; ++i) {
-		sptr->next = make_state(sts[i]);
+		sptr->next = make_state(sts[i], i);
 		if (!sptr->next) {
 			printk(KERN_DEBUG "nc_kernel: init: wtf2\n");
 			return -1;
