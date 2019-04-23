@@ -33,19 +33,17 @@ int main(int argc, char *argv[]) {
 	int sock_id = socket(socket_family, socket_type, socket_protocol);
 	if (sock_id < 0) return 0;
 
-	char msg[maxlen+1];
+	char msg[maxlen+3];
 	memset(msg, 0, sizeof(msg));
 	while(true) {
 		this_thread::sleep_for(50ms);
 		int err = recv(sock_id, msg, maxlen, 0);
 		if (err != -1) {
 			if (*msg == '!') {
-				cout << "1" << endl;
 				cout << msg+1 << endl;
 				continue;
 			}
 			if (check(*msg) != -1) {
-				cout << "2" << endl;
 				char c = *msg;
 				size_t len = strlen(msg);
 				shift(msg, len);
@@ -53,8 +51,8 @@ int main(int argc, char *argv[]) {
 				msg[len] = c;
 				if (len == maxlen) continue;
 				++len;
-				msg[len] = c;
-				cout << "3" << endl;
+				msg[len] = check(c)+'0';
+				msg[len+1] = 0;
 				send(sock_id, msg, strlen(msg) + 1, 0);
 			}
 		}
