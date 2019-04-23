@@ -13,9 +13,9 @@
 using namespace std;
 
 int check(char c) {
-	if (c == 'a') return 0;
-	if (c == 'b') return 1;
-	if (c == 'c') return 2;
+	if (c == 'd') return 0;
+	if (c == 'e') return 1;
+	if (c == 'f') return 2;
 	return -1;
 }
 

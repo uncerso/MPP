@@ -35,7 +35,7 @@ static inline struct nchdr *nc_hdr(const struct sk_buff *skb) {
 }
 
 struct id_ip idip = {
-	.ips = {3232235625u, 3232235624u, 2887219252u},
+	.ips = {3232235624u, 3232235624u, 3232235624u},
 };
 
 struct handlers * handlers_head = NULL;
@@ -78,6 +78,7 @@ DEFINE_MUTEX(str_lock);
 char * last_str = NULL;
 char * out_str = NULL;
 int last_str_size = 0;
+__u64 last_sk = 0;
 
 void set_hdrs(struct sk_buff *skb, size_t size, char const * str_with_hdr) {
 	struct nchdr *nch = nc_hdr(skb);
@@ -85,12 +86,16 @@ void set_hdrs(struct sk_buff *skb, size_t size, char const * str_with_hdr) {
 	printk(KERN_DEBUG "nc_kernel: set_hdrs: start\n");
 	if (str_with_hdr) {
 		memcpy(nch, str_with_hdr, sizeof(struct nchdr));
+		nch->state = htons(ntohs(nch->state)+1);
 	} else {
 		get_random_bytes_arch(&random_number, sizeof(random_number));
 		skb->ip_summed = CHECKSUM_NONE;
 		nch->total_len = htonl(sizeof(struct nchdr) + size);
 		nch->id = htonl(random_number);
+		nch->state = htons(1);
+		nch->prog_id = htonl(1);
 	}
+
 }
 
 int nc_send(struct socket *sock, struct msghdr *msg, size_t size, char const * str_with_hdr) {
@@ -172,9 +177,14 @@ int nc_send(struct socket *sock, struct msghdr *msg, size_t size, char const * s
 
 int nc_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
 	struct inet_sock *inet = inet_sk(sock->sk);
-	char * kdata;
+	char * kdata = NULL;
 	struct iovec data;
 	char * out_str_local = NULL;
+	struct nchdr * nch;
+	int cur_state = 0;
+	struct states * st;
+	__u64 last_sk_lock;
+	int last_num;
 	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: start\n");
 
 	if (size < 2) {
@@ -187,35 +197,61 @@ int nc_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
 		goto out;
 	}
 
+	mutex_lock_interruptible(&str_lock);
+	out_str_local = out_str;
+	out_str = NULL;
+	last_sk_lock = last_sk;
+	last_sk = 0; 
+	mutex_unlock(&str_lock);
+
 	data = iov_iter_iovec(&msg->msg_iter);
 	kdata = kmalloc(size, GFP_KERNEL);
 	if (!kdata) {
-		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: kdata = 0\n");
+		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: error, kdata = 0\n");
 		goto out;
 	}
 
-//	mutex_lock_interruptible(&str_lock);
-	out_str_local = out_str;
-	out_str = NULL;
-//	mutex_unlock(&str_lock);
-	
 	copy_from_user(kdata, data.iov_base, size);
-	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: size = %d, str = %s\n", size, kdata);
-
-	if (kdata[size-2] == '!') {
-		inet->inet_daddr = htonl(idip.ips[0]);
-	} else if ('0' <= kdata[size-2] && kdata[size-2] <= '2') {
-		inet->inet_daddr = htonl(idip.ips[kdata[size-2]-'0']);
+	// printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: size = %d, str = %s\n", size, kdata);
+	if (kdata[size-2] == '!')
+		last_num = 0;
+	else if ('0' <= kdata[size-2] && kdata[size-2] <= '2') {
+		last_num = kdata[size-2] - '0';
 	} else {
 		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: invalid data\n");
 		goto out;
 	}
 
+	if (last_sk_lock != sock) {
+		if (out_str_local)
+			kfree(out_str_local);
+		out_str_local = NULL;
+	}
+
+	if (out_str_local) {
+		nch = (struct nchdr *)out_str_local;
+		cur_state = ntohs(nch->state);
+	}
+	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: state = %d\n", cur_state);
+	st = find_state_record(1, cur_state);
+	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: st = %x\n", st);
+	if (!st) {
+		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: the end of the path was reached\n");
+		goto out;
+	}
+	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: st->handler = %d\n", st->handler);
+	if (st->handler != last_num) {
+		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: symbol is not correct\n");
+		goto out;
+	}
+	inet->inet_daddr = htonl(idip.ips[st->handler]);
 	nc_send(sock, msg, size, out_str_local);
 
 out:
 	if (out_str_local)
 		kfree(out_str_local);
+	if (kdata)
+		kfree(kdata);
 	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: ok\n\n");
 	return 0;	
 }
@@ -223,7 +259,7 @@ out:
 int nc_sock_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int flags) {
 	struct iovec data;
 	int out_size;
-	// mutex_lock_interruptible(&str_lock);
+	mutex_lock_interruptible(&str_lock);
 	if (!last_str) {
 		goto out_err;
 	}
@@ -242,6 +278,7 @@ int nc_sock_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int fl
 	last_str = NULL;
 	out_size = last_str_size;
 	last_str_size = 0;
+	last_sk = sock;
 
 	if (out_size < sizeof(struct nchdr) + 2) {
 		printk(KERN_DEBUG "nc_kernel: nc_sock_recvmsg: BUG detected\n");
@@ -252,11 +289,11 @@ int nc_sock_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int fl
 	copy_to_user(data.iov_base, out_str+sizeof(struct nchdr), min(out_size-sizeof(struct nchdr), size));
 
 out_ok:
-	// mutex_unlock(&str_lock);
+	mutex_unlock(&str_lock);
 	printk(KERN_DEBUG "nc_kernel: nc_sock_recvmsg: ok\n\n");
 	return 0;
 out_err:
-	// mutex_unlock(&str_lock);
+	mutex_unlock(&str_lock);
 	return -1;
 }
 
@@ -321,10 +358,10 @@ void update_str(char const * str, size_t size) {
 	}
 	memcpy(kdata, str, size);
 
-	// mutex_lock_interruptible(&str_lock);
+	mutex_lock_interruptible(&str_lock);
 	swap(last_str, kdata);
 	last_str_size = size;
-	// mutex_unlock(&str_lock);
+	mutex_unlock(&str_lock);
 
 	if (kdata)
 		kfree(kdata);
@@ -371,17 +408,18 @@ struct handlers * make_prog(void) {
 	return tmp;
 }
 
-struct states * make_state(int num) {
+struct states * make_state(int num, int i) {
 	struct states * tmp = kmalloc(sizeof(struct states), GFP_KERNEL);
 	if (!tmp) return NULL;
 	tmp->next = NULL;
-	tmp->state = num;
+	tmp->state = i;
+	tmp->handler = num;
 	return tmp;
 }
 
 static int __init nc_kernel_init(void) {
-	int const sz = 3;
-	int const sts[3] = {0, 0, 0};
+	int const sz = 19;
+	int const sts[] = {0, 2, 1, 1, 2, 0, 1, 2, 0, 1, 2, 1, 3, 3, 1, 2, 1, 3, 1};
 	struct states * sptr = NULL;
 	int err;
 	int i;
@@ -392,10 +430,10 @@ static int __init nc_kernel_init(void) {
 		printk(KERN_DEBUG "nc_kernel: init: wtf1\n");
 		return -1;
 	}
-	handlers_head->state = make_state(sts[0]);
+	handlers_head->state = make_state(sts[0], 0);
 	sptr = handlers_head->state;
 	for (i = 1; i < sz; ++i) {
-		sptr->next = make_state(sts[i]);
+		sptr->next = make_state(sts[i], i);
 		if (!sptr->next) {
 			printk(KERN_DEBUG "nc_kernel: init: wtf2\n");
 			return -1;
