@@ -30,7 +30,7 @@ bool check_string(char* msg) {
 	if (msg[0] == 'g' && size == 10) {
 		return true;
 	}
-	if (msg[0] == 'h' && size == 5) {
+	if (msg[0] == 'n' && size == 5) {
 		return true;
 	}
 	if (msg[0] == 'e' && size == 2) {

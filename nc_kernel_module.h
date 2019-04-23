@@ -22,6 +22,7 @@ struct nchdr {
 struct states {
 	struct states * next;
 	__u16	state;
+	__u16	handler;
 //	int		(*handler)(char * data, size_t size);
 };
 
