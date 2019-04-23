@@ -35,7 +35,7 @@ static inline struct nchdr *nc_hdr(const struct sk_buff *skb) {
 }
 
 struct id_ip idip = {
-	.ips = {3232235625u, 3232235624u, 3232235624u},
+	.ips = {3232235625u, 3232235624u, 2887219252u},
 };
 
 struct handlers * handlers_head = NULL;
@@ -124,10 +124,10 @@ int nc_send(struct socket *sock, struct msghdr *msg, size_t size, char const * s
 	if (!ipc.oif)
 		ipc.oif = inet->uc_index;
 
-	if (connected) {
-		printk(KERN_DEBUG "nc_kernel: nc_send: connected\n");
-		rt = (struct rtable *)sk_dst_check(sk, 0);
-	}
+	// if (connected) {
+	// 	printk(KERN_DEBUG "nc_kernel: nc_send: connected\n");
+	// 	rt = (struct rtable *)sk_dst_check(sk, 0);
+	// }
 	
 	if (!rt) {
 		struct net *net = sock_net(sk);
@@ -194,10 +194,10 @@ int nc_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
 		goto out;
 	}
 
-	mutex_lock_interruptible(&str_lock);
+//	mutex_lock_interruptible(&str_lock);
 	out_str_local = out_str;
 	out_str = NULL;
-	mutex_unlock(&str_lock);
+//	mutex_unlock(&str_lock);
 	
 	copy_from_user(kdata, data.iov_base, size);
 	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: size = %d, str = %s\n", size, kdata);
@@ -223,7 +223,7 @@ out:
 int nc_sock_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int flags) {
 	struct iovec data;
 	int out_size;
-	mutex_lock_interruptible(&str_lock);
+	// mutex_lock_interruptible(&str_lock);
 	if (!last_str) {
 		goto out_err;
 	}
@@ -252,11 +252,11 @@ int nc_sock_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int fl
 	copy_to_user(data.iov_base, out_str+sizeof(struct nchdr), min(out_size-sizeof(struct nchdr), size));
 
 out_ok:
-	mutex_unlock(&str_lock);
+	// mutex_unlock(&str_lock);
 	printk(KERN_DEBUG "nc_kernel: nc_sock_recvmsg: ok\n\n");
 	return 0;
 out_err:
-	mutex_unlock(&str_lock);
+	// mutex_unlock(&str_lock);
 	return -1;
 }
 
@@ -321,10 +321,10 @@ void update_str(char const * str, size_t size) {
 	}
 	memcpy(kdata, str, size);
 
-	mutex_lock_interruptible(&str_lock);
+	// mutex_lock_interruptible(&str_lock);
 	swap(last_str, kdata);
 	last_str_size = size;
-	mutex_unlock(&str_lock);
+	// mutex_unlock(&str_lock);
 
 	if (kdata)
 		kfree(kdata);

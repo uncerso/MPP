@@ -37,11 +37,9 @@ int main(int argc, char *argv[]) {
 	char msg[512];
 	memset(msg, 0, sizeof(msg));
 	while(true) {
+		this_thread::sleep_for(1ms);
 		int err = recv(sock_id, msg, sizeof(msg), 0);
-		if (err == -1) {
-			this_thread::sleep_for(100ms);
-		}
-		else {
+		if (err != -1) {
 			cout << "Received msg\n";
 			cout << "\tcontent: " << msg << endl;
 			if (check_string(msg)) {
@@ -49,7 +47,6 @@ int main(int argc, char *argv[]) {
 				shift(msg);
 				cout << "\tright shift: " << msg << endl;
 				cout << "\t\tsending msg\n";
-				this_thread::sleep_for(100ms);
 				int err = send(sock_id, msg, strlen(msg) + 1, 0);
 				if (err == -1) {
 					cout << "\t\tsending failed"<< endl;
