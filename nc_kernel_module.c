@@ -78,6 +78,7 @@ DEFINE_MUTEX(str_lock);
 char * last_str = NULL;
 char * out_str = NULL;
 int last_str_size = 0;
+__u64 last_sk = 0;
 
 void set_hdrs(struct sk_buff *skb, size_t size, char const * str_with_hdr) {
 	struct nchdr *nch = nc_hdr(skb);
@@ -182,6 +183,7 @@ int nc_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
 	struct nchdr * nch;
 	int cur_state = 0;
 	struct states * st;
+	__u64 last_sk_lock;
 	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: start\n");
 
 	if (size < 2) {
@@ -201,10 +203,12 @@ int nc_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
 	// 	goto out;
 	// }
 
-//	mutex_lock_interruptible(&str_lock);
+	mutex_lock_interruptible(&str_lock);
 	out_str_local = out_str;
 	out_str = NULL;
-//	mutex_unlock(&str_lock);
+	last_sk_lock = last_sk;
+	last_sk = 0; 
+	mutex_unlock(&str_lock);
 	
 	// copy_from_user(kdata, data.iov_base, size);
 	// printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: size = %d, str = %s\n", size, kdata);
@@ -217,6 +221,12 @@ int nc_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
 	// 	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: invalid data\n");
 	// 	goto out;
 	// }
+
+	if (last_sk_lock != sock) {
+		if (out_str_local)
+			kfree(out_str_local);
+		out_str_local = NULL;
+	}
 
 	if (out_str_local) {
 		nch = (struct nchdr *)out_str_local;
@@ -241,7 +251,7 @@ out:
 int nc_sock_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int flags) {
 	struct iovec data;
 	int out_size;
-	// mutex_lock_interruptible(&str_lock);
+	mutex_lock_interruptible(&str_lock);
 	if (!last_str) {
 		goto out_err;
 	}
@@ -260,6 +270,7 @@ int nc_sock_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int fl
 	last_str = NULL;
 	out_size = last_str_size;
 	last_str_size = 0;
+	last_sk = sock;
 
 	if (out_size < sizeof(struct nchdr) + 2) {
 		printk(KERN_DEBUG "nc_kernel: nc_sock_recvmsg: BUG detected\n");
@@ -270,11 +281,11 @@ int nc_sock_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int fl
 	copy_to_user(data.iov_base, out_str+sizeof(struct nchdr), min(out_size-sizeof(struct nchdr), size));
 
 out_ok:
-	// mutex_unlock(&str_lock);
+	mutex_unlock(&str_lock);
 	printk(KERN_DEBUG "nc_kernel: nc_sock_recvmsg: ok\n\n");
 	return 0;
 out_err:
-	// mutex_unlock(&str_lock);
+	mutex_unlock(&str_lock);
 	return -1;
 }
 
@@ -339,10 +350,10 @@ void update_str(char const * str, size_t size) {
 	}
 	memcpy(kdata, str, size);
 
-	// mutex_lock_interruptible(&str_lock);
+	mutex_lock_interruptible(&str_lock);
 	swap(last_str, kdata);
 	last_str_size = size;
-	// mutex_unlock(&str_lock);
+	mutex_unlock(&str_lock);
 
 	if (kdata)
 		kfree(kdata);

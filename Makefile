@@ -23,6 +23,6 @@ app1_:
 app2_:
 	g++ -Wall -O3 --std=c++17 app2.cpp -o app2
 app3_:
-	g++ -Wall -O3 --std=c++17 app2.cpp -o app3
+	g++ -Wall -O3 --std=c++17 app3.cpp -o app3
 init_:
 	g++ -Wall -O3 --std=c++17 init.cpp -o init
