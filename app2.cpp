@@ -62,6 +62,10 @@ int main(int argc, char *argv[]) {
 				cout << "\tfirst symbol is correct"<< endl;
 				shift(msg);
 				cout << "\tright shift: " << msg << endl;
+				if (strlen(msg) == 0) {
+					cout << "the program has successfully completed" << endl;
+					exit(0);
+				}
 				cout << "\t\tsending msg\n";
 				int err = send(sock_id, msg, strlen(msg) + 1, 0);
 				if (err == -1) {
