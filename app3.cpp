@@ -12,68 +12,49 @@
 
 using namespace std;
 
-void shift(char* msg) {
-	size_t const size = strlen(msg);
-	for(size_t i = 0; i < size; ++i)
+int check(char c) {
+	if (c == 'g') return 0;
+	if (c == 'h') return 1;
+	if (c == 'i') return 2;
+	return -1;
+}
+
+void shift(char* msg, size_t len) {
+	for(size_t i = 0; i < len; ++i)
 		msg[i] = msg[i + 1];
-}
-
-void show_result(char* msg) {
-	cout << '\t' << msg << endl;
-}
-
-bool check_string(char* msg) {
-	size_t const size = strlen(msg);
-	if (size == 0) {
-		return false;
-	}
-	if (msg[0] == 'e' && size == 9) {
-		return true;
-	}
-	if (msg[0] == 'a' && size == 6) {
-		return true;
-	}
-	if (msg[0] == 'w' && size == 3) {
-		return true;
-	}
-	return false;
 }
 
 int main(int argc, char *argv[]) {
 	constexpr int socket_family = 41;
 	constexpr int socket_type = 2;
 	constexpr int socket_protocol = 2;
+	constexpr int maxlen = 60;
 
 	int sock_id = socket(socket_family, socket_type, socket_protocol);
 	if (sock_id < 0) return 0;
 
-	char msg[50];
+	char msg[maxlen+1];
 	memset(msg, 0, sizeof(msg));
 	while(true) {
-		this_thread::sleep_for(1ms);
-		int err = recv(sock_id, msg, sizeof(msg), 0);
+		this_thread::sleep_for(50ms);
+		int err = recv(sock_id, msg, maxlen, 0);
 		if (err != -1) {
-			cout << "Received msg\n";
-			cout << "\tcontent: " << msg << endl;
-			if (check_string(msg)) {
-				cout << "\tfirst symbol is correct"<< endl;
-				shift(msg);
-				cout << "\tright shift: " << msg << endl;
-				cout << "\t\tsending msg\n";
-				int err = send(sock_id, msg, strlen(msg) + 1, 0);
-				if (err == -1) {
-					cout << "\t\tsending failed"<< endl;
-					exit(0);
-				}
-				cout << "\t\tSuccessfully sended"<< endl;
+			if (*msg == '!') {
+				cout << msg+1 << endl;
+				continue;
 			}
-			else {
-				cout << "\tthe first symbol is incorrect"<< endl;
-				cout << "\tstopped at: "<< endl;
-				show_result(msg);
+			if (check(*msg) != -1) {
+				char c = *msg;
+				size_t len = strlen(msg);
+				shift(msg, len);
+				--len;
+				msg[len] = c;
+				if (len == maxlen) continue;
+				++len;
+				msg[len] = c;
+				send(sock_id, msg, strlen(msg) + 1, 0);
 			}
 		}
 	}
-
 	return 0;
 }

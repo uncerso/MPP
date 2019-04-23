@@ -177,13 +177,14 @@ int nc_send(struct socket *sock, struct msghdr *msg, size_t size, char const * s
 
 int nc_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
 	struct inet_sock *inet = inet_sk(sock->sk);
-//	char * kdata;
+	char * kdata = NULL;
 	struct iovec data;
 	char * out_str_local = NULL;
 	struct nchdr * nch;
 	int cur_state = 0;
 	struct states * st;
 	__u64 last_sk_lock;
+	int last_num;
 	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: start\n");
 
 	if (size < 2) {
@@ -196,31 +197,30 @@ int nc_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
 		goto out;
 	}
 
-	// data = iov_iter_iovec(&msg->msg_iter);
-	// kdata = kmalloc(size, GFP_KERNEL);
-	// if (!kdata) {
-	// 	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: kdata = 0\n");
-	// 	goto out;
-	// }
-
 	mutex_lock_interruptible(&str_lock);
 	out_str_local = out_str;
 	out_str = NULL;
 	last_sk_lock = last_sk;
 	last_sk = 0; 
 	mutex_unlock(&str_lock);
-	
-	// copy_from_user(kdata, data.iov_base, size);
-	// printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: size = %d, str = %s\n", size, kdata);
 
-	// if (kdata[size-2] == '!') {
-	// 	inet->inet_daddr = htonl(idip.ips[0]);
-	// } else if ('0' <= kdata[size-2] && kdata[size-2] <= '2') {
-	// 	inet->inet_daddr = htonl(idip.ips[kdata[size-2]-'0']);
-	// } else {
-	// 	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: invalid data\n");
-	// 	goto out;
-	// }
+	data = iov_iter_iovec(&msg->msg_iter);
+	kdata = kmalloc(size, GFP_KERNEL);
+	if (!kdata) {
+		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: error, kdata = 0\n");
+		goto out;
+	}
+
+	copy_from_user(kdata, data.iov_base, size);
+	// printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: size = %d, str = %s\n", size, kdata);
+	if (kdata[size-2] == '!')
+		last_num = 0;
+	else if ('0' <= kdata[size-2] && kdata[size-2] <= '2') {
+		last_num = kdata[size-2] - '0';
+	} else {
+		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: invalid data\n");
+		goto out;
+	}
 
 	if (last_sk_lock != sock) {
 		if (out_str_local)
@@ -235,15 +235,23 @@ int nc_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
 	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: state = %d\n", cur_state);
 	st = find_state_record(1, cur_state);
 	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: st = %x\n", st);
-	if (!st)
+	if (!st) {
+		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: the end of the path was reached\n");
 		goto out;
+	}
 	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: st->handler = %d\n", st->handler);
+	if (st->handler != last_num) {
+		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: symbol is not correct\n");
+		goto out;
+	}
 	inet->inet_daddr = htonl(idip.ips[st->handler]);
 	nc_send(sock, msg, size, out_str_local);
 
 out:
 	if (out_str_local)
 		kfree(out_str_local);
+	if (kdata)
+		kfree(kdata);
 	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: ok\n\n");
 	return 0;	
 }
@@ -410,8 +418,8 @@ struct states * make_state(int num, int i) {
 }
 
 static int __init nc_kernel_init(void) {
-	int const sz = 10;
-	int const sts[] = {0, 2, 1, 1, 2, 0, 1, 2, 0, 1};
+	int const sz = 19;
+	int const sts[] = {0, 2, 1, 1, 2, 0, 1, 2, 0, 1, 2, 1, 3, 3, 1, 2, 1, 3, 1};
 	struct states * sptr = NULL;
 	int err;
 	int i;
