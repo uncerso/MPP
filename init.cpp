@@ -27,7 +27,7 @@ int main(int argc, char *argv[]) {
 		cout << "Failed\n";
 		return 0;
 	}
-	cout << "Sended";
+	cout << "Sended\n";
 
 	return 0;
 }

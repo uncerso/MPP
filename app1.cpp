@@ -28,15 +28,12 @@ bool check_string(char* msg) {
 		return false;
 	}
 	if (msg[0] == 'g' && size == 10) {
-		shift(msg);
 		return true;
 	}
 	if (msg[0] == 'h' && size == 5) {
-		shift(msg);
 		return true;
 	}
 	if (msg[0] == 'e' && size == 2) {
-		shift(msg);
 		return true;
 	}
 	return false;
