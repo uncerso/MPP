@@ -27,15 +27,19 @@ bool check_string(char* msg) {
 	if (size == 0) {
 		return false;
 	}
-	if (msg[0] == 'g' && size == 10) {
+	if (msg[0] == 't' && size == 8) {
 		shift(msg);
 		return true;
 	}
-	if (msg[0] == 'h' && size == 5) {
+	if (msg[0] == '_' && size == 7) {
 		shift(msg);
 		return true;
 	}
-	if (msg[0] == 'e' && size == 2) {
+	if (msg[0] == 's' && size == 4) {
+		shift(msg);
+		return true;
+	}
+    if (msg[0] == 'r' && size == 1) {
 		shift(msg);
 		return true;
 	}
