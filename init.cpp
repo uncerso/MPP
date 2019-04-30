@@ -19,15 +19,16 @@ int main(int argc, char *argv[]) {
 	if (sock_id < 0) return 0;
 
 	string s;
-	cout << "> ";
+	cout << ">> ";
 	cin >> s;
+	s.push_back('!');
 	int err = send(sock_id, s.data(), s.size() + 1, 0);
 	if (err == -1)
 	{
 		cout << "Failed\n";
 		return 0;
 	}
-	cout << "Sended";
+	cout << "Sended\n";
 
 	return 0;
 }
