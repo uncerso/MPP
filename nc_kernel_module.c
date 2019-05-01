@@ -6,7 +6,6 @@
 #include <net/sock.h>
 #include <net/inet_sock.h>
 #include <net/protocol.h>
-#include <linux/mutex.h>
 
 #include <linux/string.h>
 
@@ -35,7 +34,8 @@ static inline struct nchdr *nc_hdr(const struct sk_buff *skb) {
 }
 
 struct id_ip idip = {
-	.ips = {3232235624u, 3232235624u, 3232235624u},
+	.ips = {2130706433u, 2130706433u, 2130706433u},
+//	.ips = {3232235624u, 3232235624u, 3232235624u},
 };
 
 struct handlers * handlers_head = NULL;
@@ -57,6 +57,73 @@ struct states * find_state_record(__u32 prog_id, int state) {
 	return sptr;
 }
 
+struct queue recv_queue;
+//==============================================
+void queue_init(struct queue * q) {
+	q->head = NULL;
+	q->back = NULL;
+	mutex_init(&q->lock);
+}
+
+int queue_destroy(struct queue * q) {
+	mutex_lock(&q->lock);
+
+	while(q->head) {
+		q->back = q->head->next;
+		kfree_skb(q->head);
+		q->head = q->back;
+	}
+	
+	mutex_unlock(&q->lock);
+	mutex_destroy(&q->lock);
+	return 0;
+}
+
+void queue_push(struct queue * q, struct sk_buff * new_skb) {
+//	printk(KERN_DEBUG "nc_kernel: queue_push_node: start\n");
+	new_skb->next = NULL;
+
+	mutex_lock(&q->lock);
+//	printk(KERN_DEBUG "nc_kernel: queue_push_node: locked\n");
+
+//	printk(KERN_DEBUG "nc_kernel: queue_push_node: head = %x\n", q->head);
+//	printk(KERN_DEBUG "nc_kernel: queue_push_node: back = %x\n", q->back);
+	if (q->back)
+		q->back->next = new_skb;
+	else
+		q->head = new_skb;
+	
+	q->back = new_skb;
+
+	mutex_unlock(&q->lock);
+//	printk(KERN_DEBUG "nc_kernel: queue_push_node: unlocked\n");
+}
+
+struct sk_buff * queue_pop(struct queue * q) {
+	struct sk_buff * node = NULL;
+
+	mutex_lock(&q->lock);
+//	printk(KERN_DEBUG "nc_kernel: queue_pop: head = %x\n", q->head);
+//	printk(KERN_DEBUG "nc_kernel: queue_pop: back = %x\n", q->back);
+	if (!q->head) {
+		mutex_unlock(&q->lock);
+		return NULL;
+	}
+
+	node = q->head;
+	q->head = q->head->next;
+//	printk(KERN_DEBUG "nc_kernel: queue_pop: head = %x\n", q->head);
+	if (!q->head)
+		q->back = NULL;
+
+	mutex_unlock(&q->lock);
+//	printk(KERN_DEBUG "nc_kernel: queue_pop: unlocked\n");
+
+	node->next = NULL;
+	return node;
+}
+//==============================================
+
 int nc_sock_release(struct socket *sock) {
 	struct sock *sk = sock->sk;
 //	printk(KERN_DEBUG "nc_kernel: nc_sock_release: start\n");
@@ -74,11 +141,7 @@ int nc_sock_release(struct socket *sock) {
 	return 0;
 }
 
-DEFINE_MUTEX(str_lock);
-char * last_str = NULL;
-char * out_str = NULL;
-int last_str_size = 0;
-__u64 last_sk = 0;
+struct sk_buff * node_to_send = NULL;
 
 void set_hdrs(struct sk_buff *skb, size_t size, char const * str_with_hdr) {
 	struct nchdr *nch = nc_hdr(skb);
@@ -167,133 +230,77 @@ int nc_send(struct socket *sock, struct msghdr *msg, size_t size, char const * s
 		err = ip_send_skb_nc(sock_net(sk), skb);
 //		printk(KERN_DEBUG "nc_kernel: nc_send: return value of ip_send_skb is %d\n", err);
 	}
-	if (rt) {
-//		printk(KERN_DEBUG "nc_kernel: nc_send: rt free\n");
+	if (likely(rt))
 		ip_rt_put(rt);
-	}
 //	printk(KERN_DEBUG "nc_kernel: nc_send: ok\n");
 	return 0;
 }
 
 int nc_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
 	struct inet_sock *inet = inet_sk(sock->sk);
-	char * kdata = NULL;
 	struct iovec data;
-	char * out_str_local = NULL;
 	struct nchdr * nch;
-	int cur_state = 0;
 	struct states * st;
-	__u64 last_sk_lock;
-	int last_num;
+	int cur_state = 0;
+	char const * str = NULL;
+	struct sk_buff * local_node = NULL;
 //	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: start\n");
 
-	if (size < 2) {
+	if (size < 1) {
 		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: msg too small\n");
 		goto out;
 	}
 
 	if (!iter_is_iovec(&msg->msg_iter)) {
-//		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: msg is not an iovec\n");
+		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: msg is not an iovec\n");
 		goto out;
 	}
 
-	mutex_lock_interruptible(&str_lock);
-	out_str_local = out_str;
-	out_str = NULL;
-	last_sk_lock = last_sk;
-	last_sk = 0; 
-	mutex_unlock(&str_lock);
-
+	local_node = node_to_send;
+	node_to_send = NULL;
+	
 	data = iov_iter_iovec(&msg->msg_iter);
-	kdata = kmalloc(size, GFP_KERNEL);
-	if (!kdata) {
-		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: error, kdata = 0\n");
-		goto out;
-	}
-
-	copy_from_user(kdata, data.iov_base, size);
-//	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: size = %d, str = %s\n", size, kdata);
-	if (kdata[size-2] == '!')
-		last_num = 0;
-	else if ('0' <= kdata[size-2] && kdata[size-2] <= '2') {
-		last_num = kdata[size-2] - '0';
-	} else {
-		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: invalid data\n");
-		goto out;
-	}
-
-	if (last_sk_lock != sock) {
-		if (out_str_local)
-			kfree(out_str_local);
-		out_str_local = NULL;
-	}
-
-	if (out_str_local) {
-		nch = (struct nchdr *)out_str_local;
+	
+	if (local_node) {
+		nch = (struct nchdr *)local_node->data;
 		cur_state = ntohs(nch->state);
+		str = local_node->data;
 	}
-//	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: state = %d\n", cur_state);
 	st = find_state_record(1, cur_state);
-//	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: st = %x\n", st);
 	if (!st) {
 		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: the end of the path was reached\n");
 		goto out;
 	}
-//	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: st->handler = %d\n", st->handler);
-	if (st->handler != last_num) {
-		printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: symbol is not correct\n");
-		goto out;
-	}
 	inet->inet_daddr = htonl(idip.ips[st->handler]);
-	nc_send(sock, msg, size, out_str_local);
+	nc_send(sock, msg, size, str);
 
 out:
-	if (out_str_local)
-		kfree(out_str_local);
-	if (kdata)
-		kfree(kdata);
+	if (local_node)
+		kfree_skb(local_node);
 //	printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: ok\n\n");
 	return 0;	
 }
 
 int nc_sock_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int flags) {
 	struct iovec data;
-	int out_size;
-	mutex_lock_interruptible(&str_lock);
-	if (!last_str) {
-		goto out_err;
-	}
-//	printk(KERN_DEBUG "nc_kernel: nc_sock_recvmsg: start\n");
+	struct sk_buff * node = NULL;
 	
-	if (!iter_is_iovec(&msg->msg_iter)) {
-//		printk(KERN_DEBUG "nc_kernel: nc_sock_recvmsg: msg is not an iovec\n");
-		goto out_ok;
-	}
-	data = iov_iter_iovec(&msg->msg_iter);
-//	printk(KERN_DEBUG "nc_kernel: nc_sock_recvmsg: size = %lu, buf_len = %lu\n", size, data.iov_len);
-
-	if (out_str)
-		kfree(out_str);
-	out_str = last_str;
-	last_str = NULL;
-	out_size = last_str_size;
-	last_str_size = 0;
-	last_sk = sock;
-
-	if (out_size < sizeof(struct nchdr) + 2) {
-		printk(KERN_DEBUG "nc_kernel: nc_sock_recvmsg: BUG detected\n");
-//		printk(KERN_DEBUG "nc_kernel: nc_sock_recvmsg: size = %d\n", last_str_size);
+	if (unlikely(!iter_is_iovec(&msg->msg_iter))) {
+		printk(KERN_DEBUG "nc_kernel: nc_sock_recvmsg: msg is not an iovec\n");
 		goto out_err;
 	}
+	
+	node = queue_pop(&recv_queue);
+	if (!node)
+		goto out_err;
+	
+	data = iov_iter_iovec(&msg->msg_iter);
 
-	copy_to_user(data.iov_base, out_str+sizeof(struct nchdr), min(out_size-sizeof(struct nchdr), size));
+	copy_to_user(data.iov_base, node->data+sizeof(struct nchdr), min(node->len-sizeof(struct nchdr), size));
 
-out_ok:
-	mutex_unlock(&str_lock);
-//	printk(KERN_DEBUG "nc_kernel: nc_sock_recvmsg: ok\n\n");
+	node_to_send = node;
 	return 0;
 out_err:
-	mutex_unlock(&str_lock);
 	return -1;
 }
 
@@ -349,33 +356,21 @@ static const struct net_proto_family nc_proto_family = {
 	.owner		= THIS_MODULE,
 };
 
-void update_str(char const * str, size_t size) {
-	char * kdata = kmalloc(size, GFP_KERNEL);
-//	printk(KERN_DEBUG "nc_kernel: update_str: updating str...\n");
-	if (!kdata) {
-//		printk(KERN_DEBUG "nc_kernel: update_str: kdata = 0\n");
-		return;
-	}
-	memcpy(kdata, str, size);
-
-	mutex_lock_interruptible(&str_lock);
-	swap(last_str, kdata);
-	last_str_size = size;
-	mutex_unlock(&str_lock);
-
-	if (kdata)
-		kfree(kdata);
-//	printk(KERN_DEBUG "nc_kernel: update_str: ok\n\n");
-}
-
 int nc_rcv(struct sk_buff *skb) {
 //	printk(KERN_DEBUG "nc_kernel: nc_rcv: data received!\n\n");
 	while(skb) {
 		struct sk_buff * next = skb->next;
-		update_str(skb->data, skb->len);
-		kfree_skb(skb);
+		if (unlikely(
+				skb->len < sizeof(struct nchdr) || 
+				skb->len != ntohl(((struct nchdr *)skb->data)->total_len)
+				)
+			) return 0;
+
+//		printk(KERN_DEBUG "nc_kernel: nc_rcv: str = %s\n", skb->data+sizeof(struct nchdr));
+		queue_push(&recv_queue, skb);
 		skb = next;
 	}
+//	printk(KERN_DEBUG "nc_kernel: nc_rcv: ok\n\n");
 	return 0;
 }
 
@@ -423,7 +418,7 @@ static int __init nc_kernel_init(void) {
 	struct states * sptr = NULL;
 	int err;
 	int i;
-//	printk(KERN_DEBUG "nc_kernel: init: start\n");
+	printk(KERN_DEBUG "nc_kernel: init: start\n");
 
 	handlers_head = make_prog();
 	if (!handlers_head) {
@@ -442,20 +437,20 @@ static int __init nc_kernel_init(void) {
 	}
 
 	err = sock_register(&nc_proto_family);
-//	printk(KERN_DEBUG "nc_kernel: init: return value of sock_register is %d\n", err);
+	printk(KERN_DEBUG "nc_kernel: init: return value of sock_register is %d\n", err);
 	if (err) {
 		sock_unregister(PF_NC);
 		err = sock_register(&nc_proto_family);
-//		printk(KERN_DEBUG "nc_kernel: init: return value of sock_register (attemption 2) is %d\n", err);
+		printk(KERN_DEBUG "nc_kernel: init: return value of sock_register (attemption 2) is %d\n", err);
 		if (err)
 			return err;
 	}	
 	err = proto_register(&nc_prot, 1);
-//	printk(KERN_DEBUG "nc_kernel: init: return value of proto_register is %d\n", err);
+	printk(KERN_DEBUG "nc_kernel: init: return value of proto_register is %d\n", err);
 	if (err) return err;
 
 	err = inet_add_protocol(&nc_protocol, IPPROTO_NC);
-//	printk(KERN_DEBUG "nc_kernel: init: return value of inet_add_protocol is %d\n", err);
+	printk(KERN_DEBUG "nc_kernel: init: return value of inet_add_protocol is %d\n", err);
 	if (err) return err;
 
 	inet_register_protosw(&inet_protosw_nc);
@@ -463,19 +458,20 @@ static int __init nc_kernel_init(void) {
 	ip_make_skb_nc = kallsyms_lookup_name("ip_make_skb");
 	ip_send_skb_nc = kallsyms_lookup_name("ip_send_skb");
 
-//	printk(KERN_DEBUG "nc_kernel: init: ok\n\n");
+	queue_init(&recv_queue);
+	printk(KERN_DEBUG "nc_kernel: init: ok\n\n");
 	return 0;
 }
 
 static void __exit nc_kernel_exit(void) {
 	int err;
 	struct states * sptr = NULL;
-//	printk(KERN_DEBUG "nc_kernel: exit: start\n");
+	printk(KERN_DEBUG "nc_kernel: exit: start\n");
 	
 	inet_unregister_protosw(&inet_protosw_nc);
 
 	err = inet_del_protocol(&nc_protocol, IPPROTO_NC);
-//	printk(KERN_DEBUG "nc_kernel: init: return value of inet_del_protocol is %d\n", err);
+	printk(KERN_DEBUG "nc_kernel: init: return value of inet_del_protocol is %d\n", err);
 	
 	proto_unregister(&nc_prot);
 	sock_unregister(PF_NC);
@@ -490,12 +486,9 @@ static void __exit nc_kernel_exit(void) {
 		sptr = next;
 	}
 
-	if (last_str)
-		kfree(last_str);
-	if (out_str)
-		kfree(out_str);
-	mutex_destroy(&str_lock);
-//	printk(KERN_DEBUG "nc_kernel: exit: ok\n\n");
+	queue_destroy(&recv_queue);
+	
+	printk(KERN_DEBUG "nc_kernel: exit: ok\n\n");
 }
 
 module_init(nc_kernel_init);

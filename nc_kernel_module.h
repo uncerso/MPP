@@ -1,5 +1,6 @@
 #ifndef __nc_kernel_module__
 #define __nc_kernel_module__
+#include <linux/mutex.h>
 
 struct nchdr {
 	__u8	type;
@@ -34,6 +35,14 @@ struct handlers {
 
 struct id_ip {
 	__u32 ips[3];
+};
+
+struct queue {
+
+	struct sk_buff * head;
+	struct sk_buff * back;
+
+	struct mutex lock;
 };
 
 #endif

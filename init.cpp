@@ -1,10 +1,5 @@
 #include <iostream>
 #include <sys/socket.h>
-#include <sys/ioctl.h>
-#include <sys/errno.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <string.h>
 #include <string>
 #include <unistd.h>
 
