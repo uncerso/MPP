@@ -1,5 +1,6 @@
 #ifndef __nc_kernel_module__
 #define __nc_kernel_module__
+#include "nc_queues.h"
 
 struct nchdr {
 	__u8	type;
@@ -22,8 +23,9 @@ struct nchdr {
 struct states {
 	struct states * next;
 	__u16	state;
-	__u16	handler;
-//	int		(*handler)(char * data, size_t size);
+	__u16	next_dev;
+	__u32	handler_type;
+	void	(*handler)(struct sk_buff * skb, struct states * st);
 };
 
 struct handlers {
@@ -34,6 +36,18 @@ struct handlers {
 
 struct id_ip {
 	__u32 ips[3];
+};
+
+struct handler_data {
+	struct tasks_queue q;
+	atomic_t cnt;
+};
+
+struct nc_sock {
+	//inet_sock should be first
+	struct inet_sock   inet;
+	int handler_type;
+	struct sk_buff * node_to_send;
 };
 
 #endif
