@@ -40,7 +40,7 @@ struct id_ip {
 
 struct handler_data {
 	struct tasks_queue q;
-	int cnt;
+	atomic_t cnt;
 };
 
 struct nc_sock {

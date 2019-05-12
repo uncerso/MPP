@@ -63,7 +63,7 @@ struct states * find_state_record(__u32 prog_id, int state) {
 struct msg_queue control_msg_queue;
 //==============================================
 void handler_data_init(struct handler_data * hd) {
-	hd->cnt = 0;
+	atomic_set(&hd->cnt, 0);
 	tasks_queue_init(&hd->q);
 }
 
@@ -109,7 +109,7 @@ void default_handler(struct sk_buff * skb, struct states * st) {
 		kfree_skb(skb);
 	}
 	tasks_queue_push(&handlers_storage[st->handler_type].q, skb);
-	if (!handlers_storage[st->handler_type].cnt)
+	if (!atomic_read(&handlers_storage[st->handler_type].cnt))
 		wake_up_handler(st->handler_type);
 }
 //==============================================
@@ -140,8 +140,7 @@ int nc_sock_release(struct socket *sock) {
 		goto out;
 	}
 	
-	--handlers_storage[handler_type].cnt;
-	if (!handlers_storage[handler_type].cnt && handlers_storage[handler_type].q.head) 
+	if (!atomic_dec_and_test(&handlers_storage[handler_type].cnt) && handlers_storage[handler_type].q.head) 
 		wake_up_handler(handler_type);
 	// printk(KERN_DEBUG "nc_kernel: nc_sock_release: ok\n\n");
 out:
@@ -375,7 +374,7 @@ int nc_sock_create(struct net *net, struct socket *sock, int protocol, int kern)
 		goto err_out;
 	}
 
-	++handlers_storage[protocol].cnt;
+	atomic_inc(&handlers_storage[protocol].cnt);
 
 	sock->state = SS_UNCONNECTED;
 	sock->ops = &nc_proto_ops;
