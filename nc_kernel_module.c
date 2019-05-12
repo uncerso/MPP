@@ -59,61 +59,17 @@ struct states * find_state_record(__u32 prog_id, int state) {
 	return sptr;
 }
 
-struct tasks_queue recv_queue;
+//struct tasks_queue recv_queue;
 struct msg_queue control_msg_queue;
-//==============================================
-// handlers
-void default_handler(struct sk_buff * skb) {
-	tasks_queue_push(&recv_queue, skb);
-}
-
 //==============================================
 void handler_data_init(struct handler_data * hd) {
 	hd->cnt = 0;
 	tasks_queue_init(&hd->q);
 }
 
-#define handler_id_size 15
-struct handler_data handlers_storage[handler_id_size];
-
-inline struct nc_sock * cast_to_nc_sock(struct sock * sk) {
-	return (struct nc_sock *)inet_sk(sk);
+void handler_data_destroy(struct handler_data * hd) {
+	tasks_queue_destroy(&hd->q);
 }
-
-int nc_sock_release(struct socket *sock) {
-	struct sock *sk = sock->sk;
-	struct msg_node * node;
-	int protocol;
-	// printk(KERN_DEBUG "nc_kernel: nc_sock_release: start\n");
-	
-	if (!sk) {
-		// printk(KERN_DEBUG "nc_kernel: nc_sock_release: sk is nullptr\n");
-		return 0;
-	}
-	protocol = cast_to_nc_sock(sk)->handler_type;
-	lock_sock(sk);
-	sock->sk = NULL;
-	sk_refcnt_debug_release(sk);
-	release_sock(sk);
-	sock_put(sk);
-	
-	if (likely(protocol != 0)) {
-		node = kmalloc(sizeof(struct msg_node), GFP_KERNEL);
-		if (!node) {
-			printk(KERN_DEBUG "nc_kernel: nc_sock_create: msg_node don't allocated");
-			goto out;
-		}
-
-		node->data.code = 2;
-		node->data.value = protocol;
-		msg_queue_push(&control_msg_queue, node);
-	}
-	// printk(KERN_DEBUG "nc_kernel: nc_sock_release: ok\n\n");
-out:
-	return 0;
-}
-
-struct sk_buff * node_to_send = NULL;
 
 void nchdr_dump(struct nchdr *nch) {
 	printk(KERN_DEBUG "nc_kernel: nchdr_dump: type = %u\n", nch->type);
@@ -127,6 +83,72 @@ void nchdr_dump(struct nchdr *nch) {
 	printk(KERN_DEBUG "nc_kernel: nchdr_dump: csum = %lu\n", ntohl(nch->csum));
 	printk(KERN_DEBUG "nc_kernel: nchdr_dump: last_cpoint_id = %u\n", ntohl(nch->last_cpoint_id));
 }
+
+void wake_up_handler(int handler_type) {
+	struct msg_node * node;
+	node = kmalloc(sizeof(struct msg_node), GFP_KERNEL);
+	if (!node) {
+		printk(KERN_DEBUG "nc_kernel: nc_sock_create: msg_node don't allocated");
+		return;
+	}
+
+	node->data.code = 1;
+	node->data.value = handler_type;
+	msg_queue_push(&control_msg_queue, node);
+}
+
+#define handler_id_size 15
+struct handler_data handlers_storage[handler_id_size];
+
+//==============================================
+// handlers
+void default_handler(struct sk_buff * skb, struct states * st) {
+	if (unlikely(st->handler_type < 0 || st->handler_type >= handler_id_size)) {
+		printk(KERN_WARNING "nc_kernel: default_handler: incorrect handler type: \n", st->handler_type);
+		nchdr_dump(nc_hdr(skb));
+		kfree_skb(skb);
+	}
+	tasks_queue_push(&handlers_storage[st->handler_type].q, skb);
+	if (!handlers_storage[st->handler_type].cnt)
+		wake_up_handler(st->handler_type);
+}
+//==============================================
+
+inline struct nc_sock * cast_to_nc_sock(struct sock * sk) {
+	return (struct nc_sock *)inet_sk(sk);
+}
+
+int nc_sock_release(struct socket *sock) {
+	struct sock *sk = sock->sk;
+	struct nc_sock *ncsk = cast_to_nc_sock(sk);
+	int handler_type;
+	// printk(KERN_DEBUG "nc_kernel: nc_sock_release: start\n");
+	
+	if (!sk) 
+		goto out;
+	
+	lock_sock(sk);
+	handler_type = cast_to_nc_sock(sk)->handler_type;
+	if (ncsk->node_to_send)
+		kfree_skb(ncsk->node_to_send);
+	sock->sk = NULL;
+	sk_refcnt_debug_release(sk);
+	release_sock(sk);
+	sock_put(sk);
+	if (unlikely(handler_type < 0 || handler_type >= handler_id_size)) {
+		printk(KERN_ERR "nc_kernel: nc_sock_release: taint was detected! Socket was released with protocol = %\n", handler_type);
+		goto out;
+	}
+	
+	--handlers_storage[handler_type].cnt;
+	if (!handlers_storage[handler_type].cnt && handlers_storage[handler_type].q.head) 
+		wake_up_handler(handler_type);
+	// printk(KERN_DEBUG "nc_kernel: nc_sock_release: ok\n\n");
+out:
+	return 0;
+}
+
+struct sk_buff * node_to_send = NULL;
 
 void set_hdrs(struct sk_buff *skb, size_t size, char const * str_with_hdr) {
 	struct nchdr *nch = nc_hdr(skb);
@@ -228,7 +250,7 @@ int nc_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
 	struct states * st;
 	int cur_state = 0;
 	char const * str = NULL;
-	struct sk_buff * local_node = NULL;
+	struct nc_sock * ncsk = cast_to_nc_sock(sock->sk);
 	// printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: start\n");
 
 	if (size < 1) {
@@ -241,15 +263,12 @@ int nc_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
 		goto out;
 	}
 
-	local_node = node_to_send;
-	node_to_send = NULL;
-	
 	data = iov_iter_iovec(&msg->msg_iter);
 	
-	if (local_node) {
-		nch = (struct nchdr *)local_node->data;
+	if (ncsk->node_to_send) {
+		nch = (struct nchdr *)ncsk->node_to_send->data;
 		cur_state = ntohs(nch->state);
-		str = local_node->data;
+		str = ncsk->node_to_send->data;
 	}
 	st = find_state_record(1, cur_state);
 	if (!st) {
@@ -260,17 +279,19 @@ int nc_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
 	nc_send(sock, msg, size, str);
 
 out:
-	if (local_node)
-		kfree_skb(local_node);
+	if (ncsk->node_to_send) {
+		kfree_skb(ncsk->node_to_send);
+		ncsk->node_to_send = NULL;
+	}
 	// printk(KERN_DEBUG "nc_kernel: nc_sock_sendmsg: ok\n\n");
 	return 0;	
 }
 
-int common_rcv(struct msghdr *msg, size_t size) {
+int common_rcv(struct nc_sock * ncsk, struct msghdr *msg, size_t size) {
 	struct iovec data;
 	struct sk_buff * node = NULL;
 
-	node = tasks_queue_pop(&recv_queue);
+	node = tasks_queue_pop(&handlers_storage[ncsk->handler_type].q);
 	if (!node)
 		return -1;
 	
@@ -278,7 +299,7 @@ int common_rcv(struct msghdr *msg, size_t size) {
 
 	copy_to_user(data.iov_base, node->data+sizeof(struct nchdr), min(node->len-sizeof(struct nchdr), size));
 
-	node_to_send = node;
+	ncsk->node_to_send = node;
 	return 0;
 }
 
@@ -308,7 +329,7 @@ int nc_sock_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int fl
 		return -3;
 
 	if (likely(ncsk->handler_type)) 
-		return common_rcv(msg, size);
+		return common_rcv(ncsk, msg, size);
 	
 	return get_control_msg(msg, size);
 }
@@ -334,6 +355,9 @@ int nc_sock_create(struct net *net, struct socket *sock, int protocol, int kern)
 
 	// printk(KERN_DEBUG "nc_kernel: nc_sock_create: start\n");
 
+	if (protocol < 0 || protocol >= handler_id_size)
+		goto err_out;
+
 	if (!net_eq(net, &init_net))
 		goto err_out;
 
@@ -351,6 +375,8 @@ int nc_sock_create(struct net *net, struct socket *sock, int protocol, int kern)
 		goto err_out;
 	}
 
+	++handlers_storage[protocol].cnt;
+
 	sock->state = SS_UNCONNECTED;
 	sock->ops = &nc_proto_ops;
 	sock->type = 2;
@@ -358,12 +384,6 @@ int nc_sock_create(struct net *net, struct socket *sock, int protocol, int kern)
 	sk->sk_protocol = IPPROTO_NC;
 	ncsk = (struct nc_sock *)inet_sk(sk);
 	ncsk->handler_type = protocol;
-
-	if (likely(protocol != 0)) {
-		node->data.code = 1;
-		node->data.value = protocol;
-		msg_queue_push(&control_msg_queue, node);
-	}
 	// printk(KERN_DEBUG "nc_kernel: nc_sock_create: ok\n\n");
 	return 0;
 err_out:
@@ -396,7 +416,7 @@ int nc_rcv(struct sk_buff *skb) {
 		hdr = (struct nchdr *)skb->data;
 		st = find_state_record(ntohl(hdr->prog_id), ntohs(hdr->state));
 		if (likely(st))
-			st->handler(skb);
+			st->handler(skb, st);
 		else {
 			printk(KERN_DEBUG "nc_kernel: nc_rcv: unknown program with (prog_id, state) = (%lu, %lu)\n", ntohl(hdr->prog_id), ntohs(hdr->state));
 			nchdr_dump(hdr);
@@ -437,39 +457,49 @@ struct handlers * make_prog(void) {
 	return tmp;
 }
 
-struct states * make_state(int num, int i) {
+struct states * make_state(int num, int i, int handler_type) {
 	struct states * tmp = kmalloc(sizeof(struct states), GFP_KERNEL);
 	if (!tmp) return NULL;
 	tmp->next = NULL;
 	tmp->state = i;
 	tmp->handler = default_handler;
 	tmp->next_dev = num;
+	tmp->handler_type = handler_type;
 	return tmp;
 }
 
-static int __init nc_kernel_init(void) {
+int fill_the_path(void) {
+	struct states * sptr = NULL;
 	int const sz = 19;
 	int const sts[] = {0, 2, 1, 1, 2, 0, 1, 2, 0, 1, 1, 0, 2, 0, 2, 2, 1, 0, 1};
-	struct states * sptr = NULL;
-	int err;
+	int const handlers_types[] = {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2};
 	int i;
-	printk(KERN_DEBUG "nc_kernel: init: start\n");
 
 	handlers_head = make_prog();
 	if (!handlers_head) {
 		printk(KERN_DEBUG "nc_kernel: init: wtf1\n");
 		return -1;
 	}
-	handlers_head->state = make_state(sts[0], 0);
+	handlers_head->state = make_state(sts[0], 0, handlers_types[i]);
 	sptr = handlers_head->state;
 	for (i = 1; i < sz; ++i) {
-		sptr->next = make_state(sts[i], i);
+		sptr->next = make_state(sts[i], i, handlers_types[i]);
 		if (!sptr->next) {
 			printk(KERN_DEBUG "nc_kernel: init: wtf2\n");
 			return -1;
 		}
 		sptr = sptr->next;
 	}
+	return 0;
+}
+
+static int __init nc_kernel_init(void) {
+	int err;
+	int i;
+	printk(KERN_DEBUG "nc_kernel: init: start\n");
+
+	err = fill_the_path();
+	if (err) return err;
 
 	err = sock_register(&nc_proto_family);
 	printk(KERN_DEBUG "nc_kernel: init: return value of sock_register is %d\n", err);
@@ -493,7 +523,9 @@ static int __init nc_kernel_init(void) {
 	ip_make_skb_nc = kallsyms_lookup_name("ip_make_skb");
 	ip_send_skb_nc = kallsyms_lookup_name("ip_send_skb");
 
-	tasks_queue_init(&recv_queue);
+	for (i = 0; i < handler_id_size; ++i)
+		handler_data_init(&handlers_storage[i]);
+
 	msg_queue_init(&control_msg_queue);
 	
 	printk(KERN_DEBUG "nc_kernel: init: ok\n\n");
@@ -503,6 +535,7 @@ static int __init nc_kernel_init(void) {
 static void __exit nc_kernel_exit(void) {
 	int err;
 	struct states * sptr = NULL;
+	int i;
 	printk(KERN_DEBUG "nc_kernel: exit: start\n");
 	
 	inet_unregister_protosw(&inet_protosw_nc);
@@ -523,7 +556,9 @@ static void __exit nc_kernel_exit(void) {
 		sptr = next;
 	}
 
-	tasks_queue_destroy(&recv_queue);
+	for (i = 0; i < handler_id_size; ++i)
+		handler_data_destroy(&handlers_storage[i]);
+
 	msg_queue_destroy(&control_msg_queue);
 	
 	printk(KERN_DEBUG "nc_kernel: exit: ok\n\n");

@@ -24,7 +24,8 @@ struct states {
 	struct states * next;
 	__u16	state;
 	__u16	next_dev;
-	void	(*handler)(struct sk_buff * skb);
+	__u32	handler_type;
+	void	(*handler)(struct sk_buff * skb, struct states * st);
 };
 
 struct handlers {
@@ -46,6 +47,7 @@ struct nc_sock {
 	//inet_sock should be first
 	struct inet_sock   inet;
 	int handler_type;
+	struct sk_buff * node_to_send;
 };
 
 #endif

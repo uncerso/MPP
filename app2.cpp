@@ -8,7 +8,6 @@
 #include <string>
 #include <unistd.h>
 #include <thread>
-#include <chrono>
 
 using namespace std;
 
@@ -19,26 +18,24 @@ int main(int argc, char *argv[]) {
 	constexpr int maxlen = 60;
 
 	int sock_id = socket(socket_family, socket_type, socket_protocol);
-	if (sock_id < 0) {
-		cerr << "Cannot create socked, error: " << sock_id << '\n'; 
-		return 0;
-	}
+	if (sock_id < 0) return 0;
+
 	char msg[maxlen+1];
 	memset(msg, 0, sizeof(msg));
-	unsigned long long k = 0;
-	while(true) {
-		// this_thread::sleep_for(100ms);
-		cout << "-!-\n";
+	int k = 0;
+	while(k < 5) {
 		int err = recv(sock_id, msg, maxlen, 0);
-		if (err == 0) {
-				cout << msg << '\n';
-				++*msg;
-				char c = *msg;
-				if (!('a' <= c && c <= 'z'))
-					*msg = 'a';
-				send(sock_id, msg, strlen(msg) + 1, 0);
+		if (err != -1) {
+			cout << msg << '\n';
+			++*msg;
+			char c = *msg;
+			if (!('a' <= c && c <= 'z'))
+				*msg = 'a';
+			send(sock_id, msg, strlen(msg) + 1, 0);
+			k = 0;
 		} else {
-			cout << err << ' ' << ++k << endl;
+			++k;
+			cout << "app2: err is -1, now k = " << k << endl;
 		}
 	}
 	return 0;

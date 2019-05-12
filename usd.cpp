@@ -37,15 +37,24 @@ int main(int argc, char *argv[]) {
 	constexpr int maxlen = 60;
 
 	int sock_id = socket(socket_family, socket_type, socket_protocol);
-	if (sock_id < 0) return 0;
+	if (sock_id < 0) {
+		cerr << "Cannot create socked, error: " << sock_id << '\n'; 
+		return 0;
+	}
 
 	char msg[maxlen+1];
 	memset(msg, 0, sizeof(msg));
+	char app_name[7];
+	memcpy(app_name, "./app_", 7);
 	while (true) {
 		int err = recv(sock_id, msg, maxlen, 0);
 		if (err == 0) {
 			auto p = reinterpret_cast<msg_type *>(msg);
 			cout << "code: " <<p->code << " value: " << p->value << endl;
+			if (p->code == 1) {
+				app_name[5] = p->value + '0';
+				run_apps(app_name);
+			}
 		} else 
 			cout << "!!error: " << err << "!!\n";
 	}

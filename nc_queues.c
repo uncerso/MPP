@@ -47,7 +47,7 @@ EXPORT_SYMBOL(CAT(queue_pref, queue_push));
 
 #define DEFINE_LOCKER(queue_pref)										\
 bool CAT(queue_pref, try_lock_if_not_empty)(struct CAT(queue_pref, queue) * q) { \
-	mutex_lock(&q->lock);												\
+	mutex_lock_interruptible(&q->lock);												\
 																		\
 	if (q->head)														\
 		return 1;														\
@@ -57,12 +57,7 @@ bool CAT(queue_pref, try_lock_if_not_empty)(struct CAT(queue_pref, queue) * q) {
 }
 
 
-#define DEFINE_QUEUE_POP(queue_pref, node_type)							\
-struct node_type * CAT(queue_pref, queue_pop)(struct CAT(queue_pref, queue) * q) { \
-	struct node_type * node = NULL;										\
-																		\
-	if (wait_event_interruptible(q->read_wait,							\
-								 CAT(queue_pref, try_lock_if_not_empty)(q))) { \
+#define QUEUE_POP_LAST_PART(queue_pref, node_type)						\
 		printk(KERN_DEBUG "nc_kernel: queue_pop: interrupt\n");			\
 		return NULL;													\
 	}																	\
@@ -84,13 +79,38 @@ struct node_type * CAT(queue_pref, queue_pop)(struct CAT(queue_pref, queue) * q)
 }																		\
 EXPORT_SYMBOL(CAT(queue_pref, queue_pop));
 
+#define DEFINE_QUEUE_POP1(queue_pref, node_type)						\
+struct node_type * CAT(queue_pref, queue_pop)(struct CAT(queue_pref, queue) * q) { \
+	struct node_type * node = NULL;										\
+																		\
+	if (wait_event_interruptible(q->read_wait,							\
+								 CAT(queue_pref, try_lock_if_not_empty)(q))) { \
+QUEUE_POP_LAST_PART(queue_pref, node_type)
+
+#define DEFINE_QUEUE_POP2(queue_pref, node_type, timeout)				\
+struct node_type * CAT(queue_pref, queue_pop)(struct CAT(queue_pref, queue) * q) { \
+	struct node_type * node = NULL;										\
+																		\
+	if (wait_event_interruptible_timeout(q->read_wait,					\
+										 CAT(queue_pref, try_lock_if_not_empty)(q),\
+										 timeout) <= 0) {				\
+QUEUE_POP_LAST_PART(queue_pref, node_type)
+
+
 #define DEFINE_QUEUE_FUNCS(queue_pref, node_type, free_func)\
 DEFINE_QUEUE_INIT(queue_pref)								\
 DEFINE_QUEUE_DESTROY(queue_pref, free_func)					\
 DEFINE_QUEUE_PUSH(queue_pref, node_type)					\
 DEFINE_LOCKER(queue_pref)									\
-DEFINE_QUEUE_POP(queue_pref, node_type)
+DEFINE_QUEUE_POP1(queue_pref, node_type)
+
+#define DEFINE_QUEUE_FUNCS_TIMEOUT(queue_pref, node_type, free_func, timeout) \
+DEFINE_QUEUE_INIT(queue_pref)								\
+DEFINE_QUEUE_DESTROY(queue_pref, free_func)					\
+DEFINE_QUEUE_PUSH(queue_pref, node_type)					\
+DEFINE_LOCKER(queue_pref)									\
+DEFINE_QUEUE_POP2(queue_pref, node_type, timeout)
 
 
-DEFINE_QUEUE_FUNCS(tasks, sk_buff, kfree_skb)
+DEFINE_QUEUE_FUNCS_TIMEOUT(tasks, sk_buff, kfree_skb, 100)
 DEFINE_QUEUE_FUNCS(msg, msg_node, kfree)

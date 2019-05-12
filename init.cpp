@@ -8,7 +8,7 @@ using namespace std;
 int main(int argc, char *argv[]) {
 	constexpr int socket_family = 41;
 	constexpr int socket_type = 2;
-	constexpr int socket_protocol = 2;
+	constexpr int socket_protocol = 1;
 
 	int sock_id = socket(socket_family, socket_type, socket_protocol);
 	if (sock_id < 0) return 0;
