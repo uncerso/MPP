@@ -1,20 +1,21 @@
-name = nc_kernel_module
-obj-m += nc_kernel_module.o
-.phony: all clean unload load build app1
+NAME = nc_kernel
+OBJS = nc_kernel_module.o nc_queues.o
+$(NAME)-objs += $(OBJS)
+obj-m += $(NAME).o
+
+.phony: all clean unload load build app1_ app2_ app3_ init_ usd_
 all:
-#	if [[$(lsmod | grep nc_kernel_module)]] then
-#	make unload
 	make build
 	make load
 	make clean
 clean:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
 unload:
-	sudo rmmod $(name)
+	sudo rmmod $(NAME)
 unloadFORCE:
-	sudo rmmod --force $(name)
+	sudo rmmod --force $(NAME)
 load:
-	sudo insmod $(name).ko
+	sudo insmod $(NAME).ko
 build:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
 
@@ -26,3 +27,8 @@ app3_:
 	g++ -Wall -O3 --std=c++17 app3.cpp -o app3
 init_:
 	g++ -Wall -O3 --std=c++17 init.cpp -o init
+usd_:
+	g++ -Wall -O3 --std=c++17 usd.cpp -o usd
+
+$(NAME).o : $(OBJS)
+	ld -r -o $@ $^
