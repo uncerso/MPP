@@ -1,6 +1,6 @@
 #ifndef __nc_kernel_module__
 #define __nc_kernel_module__
-#include <linux/mutex.h>
+#include "nc_queues.h"
 
 struct nchdr {
 	__u8	type;
@@ -23,8 +23,8 @@ struct nchdr {
 struct states {
 	struct states * next;
 	__u16	state;
-	__u16	handler;
-//	int		(*handler)(char * data, size_t size);
+	__u16	next_dev;
+	void	(*handler)(struct sk_buff * skb);
 };
 
 struct handlers {
@@ -37,12 +37,15 @@ struct id_ip {
 	__u32 ips[3];
 };
 
-struct queue {
+struct handler_data {
+	struct tasks_queue q;
+	int cnt;
+};
 
-	struct sk_buff * head;
-	struct sk_buff * back;
-
-	struct mutex lock;
+struct nc_sock {
+	//inet_sock should be first
+	struct inet_sock   inet;
+	int handler_type;
 };
 
 #endif

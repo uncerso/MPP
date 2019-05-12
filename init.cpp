@@ -16,7 +16,6 @@ int main(int argc, char *argv[]) {
 	string s;
 	cout << ">> ";
 	cin >> s;
-	s.push_back('!');
 	int err = send(sock_id, s.data(), s.size() + 1, 0);
 	if (err == -1)
 	{
