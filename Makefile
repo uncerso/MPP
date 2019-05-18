@@ -25,10 +25,17 @@ app2_:
 	g++ -Wall -O3 --std=c++17 app2.cpp -o app2
 app3_:
 	g++ -Wall -O3 --std=c++17 app3.cpp -o app3
+app4_:
+	g++ -Wall -O3 --std=c++17 app4.cpp -o app4
 init_:
 	g++ -Wall -O3 --std=c++17 init.cpp -o init
 usd_:
 	g++ -Wall -O3 --std=c++17 usd.cpp -o usd
+
+trio:
+	g++ -Wall -O3 --std=c++17 app3.cpp -o app3
+	g++ -Wall -O3 --std=c++17 app4.cpp -o app4
+	g++ -Wall -O3 --std=c++17 init.cpp -o init
 
 $(NAME).o : $(OBJS)
 	ld -r -o $@ $^

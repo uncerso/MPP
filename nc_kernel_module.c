@@ -36,7 +36,7 @@ static inline struct nchdr *nc_hdr(const struct sk_buff *skb) {
 
 struct id_ip idip = {
 //	.ips = {2130706433u, 2130706433u, 2130706433u},
-//	.ips = {3232235625u, 3232235625u, 3232235625u},
+	// .ips = {3232235625u, 3232235625u, 3232235625u},
 	.ips = {3232235624u, 3232235624u, 3232235624u},
 };
 
@@ -155,7 +155,7 @@ void set_hdrs(struct sk_buff *skb, size_t size, char const * str_with_hdr) {
 	// printk(KERN_DEBUG "nc_kernel: set_hdrs: start\n");
 	if (str_with_hdr) {
 		memcpy(nch, str_with_hdr, sizeof(struct nchdr));
-		nch->state = htons(ntohs(nch->state)+1);
+		nch->state = htons((ntohs(nch->state)+1)&1);
 	} else {
 		// printk(KERN_DEBUG "nc_kernel: set_hdrs: new prog\n");
 		get_random_bytes_arch(&random_number, sizeof(random_number));
@@ -230,9 +230,8 @@ int nc_send(struct socket *sock, struct msghdr *msg, size_t size, char const * s
 	err = PTR_ERR(skb);
 	// printk(KERN_DEBUG "nc_kernel: nc_send: PTR_ERR = %d\n", err);
 
-	set_hdrs(skb, size, str_with_hdr);
-
 	if (!IS_ERR_OR_NULL(skb)) {
+		set_hdrs(skb, size, str_with_hdr);
 		err = ip_send_skb_nc(sock_net(sk), skb);
 		// printk(KERN_DEBUG "nc_kernel: nc_send: return value of ip_send_skb is %d\n", err);
 	}
@@ -402,16 +401,21 @@ static const struct net_proto_family nc_proto_family = {
 int nc_rcv(struct sk_buff *skb) {
 	struct nchdr * hdr;
 	struct states * st;
-	// printk(KERN_DEBUG "nc_kernel: nc_rcv: data received!\n\n");
+	// printk(KERN_DEBUG "nc_kernel: nc_rcv: data received!\n");
 	while(skb) {
 		struct sk_buff * next = skb->next;
+		// printk("%d\n", skb->len);
 		if (unlikely(
 				skb->len < sizeof(struct nchdr) || 
 				skb->len != ntohl(((struct nchdr *)skb->data)->total_len)
 				)
-			) return 0;
+			) {
+				printk(KERN_DEBUG "nc_kernel: nc_rcv: wtf\n");
+				nchdr_dump((struct nchdr *)skb->data);
+				kfree_skb(skb);
+				skb = next;
+			}
 
-		// printk(KERN_DEBUG "nc_kernel: nc_rcv: str = %s\n", skb->data+sizeof(struct nchdr));
 		hdr = (struct nchdr *)skb->data;
 		st = find_state_record(ntohl(hdr->prog_id), ntohs(hdr->state));
 		if (likely(st))
@@ -469,9 +473,9 @@ struct states * make_state(int num, int i, int handler_type) {
 
 int fill_the_path(void) {
 	struct states * sptr = NULL;
-	int const sz = 19;
-	int const sts[] = {0, 2, 1, 1, 2, 0, 1, 2, 0, 1, 1, 0, 2, 0, 2, 2, 1, 0, 1};
-	int const handlers_types[] = {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2};
+	int const sz = 2;
+	int const sts[] = {0, 1};
+	int const handlers_types[] = {3, 4};
 	int i;
 
 	handlers_head = make_prog();

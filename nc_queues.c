@@ -58,7 +58,7 @@ bool CAT(queue_pref, try_lock_if_not_empty)(struct CAT(queue_pref, queue) * q) {
 
 
 #define QUEUE_POP_LAST_PART(queue_pref, node_type)						\
-		printk(KERN_DEBUG "nc_kernel: queue_pop: interrupt\n");			\
+	/*	printk(KERN_DEBUG "nc_kernel: queue_pop: interrupt\n");*/		\
 		return NULL;													\
 	}																	\
 																		\
@@ -112,5 +112,7 @@ DEFINE_LOCKER(queue_pref)									\
 DEFINE_QUEUE_POP2(queue_pref, node_type, timeout)
 
 
-DEFINE_QUEUE_FUNCS_TIMEOUT(tasks, sk_buff, kfree_skb, 100)
+
+// DEFINE_QUEUE_FUNCS(tasks, sk_buff, kfree_skb)
+DEFINE_QUEUE_FUNCS_TIMEOUT(tasks, sk_buff, kfree_skb, 500);
 DEFINE_QUEUE_FUNCS(msg, msg_node, kfree)

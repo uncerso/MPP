@@ -8,8 +8,17 @@
 #include <string>
 #include <unistd.h>
 #include <thread>
+#include <sys/wait.h>
 
 using namespace std;
+
+void sigChildHandler(int signo) {
+	int status;
+	while (1) {
+		pid_t pid = waitpid(-1, &status, WNOHANG);
+		if (pid == -1) break;
+	}
+}
 
 struct msg_type {
 	int code;
@@ -36,6 +45,15 @@ int main(int argc, char *argv[]) {
 	constexpr int socket_protocol = 0;
 	constexpr int maxlen = 60;
 
+	struct sigaction act;
+	memset (&act, 0, sizeof(act));
+	act.sa_handler = sigChildHandler;
+ 
+	if (sigaction(SIGCHLD, &act, 0)) {
+		cerr << "Sigaction error\n";
+		return 1;
+	}
+
 	int sock_id = socket(socket_family, socket_type, socket_protocol);
 	if (sock_id < 0) {
 		cerr << "Cannot create socked, error: " << sock_id << '\n'; 
@@ -55,8 +73,7 @@ int main(int argc, char *argv[]) {
 				app_name[5] = p->value + '0';
 				run_apps(app_name);
 			}
-		} else 
-			cout << "!!error: " << err << "!!\n";
+		}
 	}
 	return 0;
 }
