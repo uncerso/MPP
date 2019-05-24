@@ -1,2 +1,2 @@
-constexpr int maxlen = 1024;
-constexpr int amount_of_iterations = 2;
+constexpr int maxlen = 40;
+constexpr int amount_of_iterations = 100;

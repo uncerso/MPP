@@ -1,5 +1,5 @@
-NAME = nc_kernel
-OBJS = nc_kernel_module.o nc_queues.o
+NAME = MPP
+OBJS = mpp.o mpp_queues.o
 $(NAME)-objs += $(OBJS)
 obj-m += $(NAME).o
 

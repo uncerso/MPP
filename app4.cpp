@@ -21,8 +21,7 @@ int main(int argc, char *argv[]) {
 	int sock_id = socket(socket_family, socket_type, socket_protocol);
 	if (sock_id < 0) return 0;
 
-	int tt = 5;
-	// int tt = 1000;
+	int tt = 1000;
 	char msg[maxlen+1];
 	memset(msg, 0, sizeof(msg));
 	for (int i = 0; i < amount_of_iterations; ++i) {
