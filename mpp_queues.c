@@ -27,27 +27,40 @@ void CAT(queue_pref, queue_destroy)(struct CAT(queue_pref, queue) * q) {\
 }																		\
 EXPORT_SYMBOL(CAT(queue_pref, queue_destroy));
 
-#define DEFINE_QUEUE_PUSH(queue_pref, node_type)						\
-void CAT(queue_pref, queue_push)(struct CAT(queue_pref, queue) * q,		\
-								 struct node_type * new_skb) {			\
-	new_skb->next = NULL;												\
-																		\
-	mutex_lock(&q->lock);												\
+#define DEFINE_QUEUE_PUSH_LAST_PART(queue_pref, node_type)				\
 	if (q->back)														\
-		q->back->next = new_skb;										\
+		q->back->next = new_node;										\
 	else																\
-		q->head = new_skb;												\
+		q->head = new_node;												\
 																		\
-	q->back = new_skb;													\
+	q->back = new_node;													\
 																		\
 	wake_up_interruptible(&q->read_wait);								\
 	mutex_unlock(&q->lock);												\
 }																		\
 EXPORT_SYMBOL(CAT(queue_pref, queue_push));
 
+#define DEFINE_QUEUE_PUSH1(queue_pref, node_type)						\
+void CAT(queue_pref, queue_push)(struct CAT(queue_pref, queue) * q,		\
+								 struct node_type * new_node) {			\
+	new_node->next = NULL;												\
+																		\
+	mutex_lock(&q->lock);												\
+DEFINE_QUEUE_PUSH_LAST_PART(queue_pref, node_type)
+
+#define DEFINE_QUEUE_PUSH2(queue_pref, node_type)						\
+void CAT(queue_pref, queue_push)(struct CAT(queue_pref, queue) * q,		\
+								 struct node_type * new_node) {			\
+	new_node->next = NULL;												\
+																		\
+	mutex_lock(&q->lock);												\
+	new_node->prev = q->back; 											\
+DEFINE_QUEUE_PUSH_LAST_PART(queue_pref, node_type)
+
+
 #define DEFINE_LOCKER(queue_pref)										\
 bool CAT(queue_pref, try_lock_if_not_empty)(struct CAT(queue_pref, queue) * q) { \
-	mutex_lock_interruptible(&q->lock);												\
+	mutex_lock_interruptible(&q->lock);									\
 																		\
 	if (q->head)														\
 		return 1;														\
@@ -97,22 +110,31 @@ struct node_type * CAT(queue_pref, queue_pop)(struct CAT(queue_pref, queue) * q)
 QUEUE_POP_LAST_PART(queue_pref, node_type)
 
 
-#define DEFINE_QUEUE_FUNCS(queue_pref, node_type, free_func)\
-DEFINE_QUEUE_INIT(queue_pref)								\
-DEFINE_QUEUE_DESTROY(queue_pref, free_func)					\
-DEFINE_QUEUE_PUSH(queue_pref, node_type)					\
-DEFINE_LOCKER(queue_pref)									\
+#define DEFINE_BASE_QUEUE_FUNCS(queue_pref, free_func)	\
+DEFINE_QUEUE_INIT(queue_pref)							\
+DEFINE_QUEUE_DESTROY(queue_pref, free_func)
+
+#define DEFINE_QUEUE_POP_FUNC(queue_pref, node_type)	\
+DEFINE_LOCKER(queue_pref)								\
 DEFINE_QUEUE_POP1(queue_pref, node_type)
 
-#define DEFINE_QUEUE_FUNCS_TIMEOUT(queue_pref, node_type, free_func, timeout) \
-DEFINE_QUEUE_INIT(queue_pref)								\
-DEFINE_QUEUE_DESTROY(queue_pref, free_func)					\
-DEFINE_QUEUE_PUSH(queue_pref, node_type)					\
-DEFINE_LOCKER(queue_pref)									\
+#define DEFINE_QUEUE_POP_FUNC_TIMEOUT(queue_pref, node_type, timeout)	\
+DEFINE_LOCKER(queue_pref)												\
 DEFINE_QUEUE_POP2(queue_pref, node_type, timeout)
 
 
+DEFINE_BASE_QUEUE_FUNCS(tasks, kfree_skb)
+DEFINE_QUEUE_PUSH1(tasks, sk_buff)
+DEFINE_QUEUE_POP_FUNC_TIMEOUT(tasks, sk_buff, msecs_to_jiffies(500))
 
-// DEFINE_QUEUE_FUNCS(tasks, sk_buff, kfree_skb)
-DEFINE_QUEUE_FUNCS_TIMEOUT(tasks, sk_buff, kfree_skb, 500);
-DEFINE_QUEUE_FUNCS(msg, msg_node, kfree)
+DEFINE_BASE_QUEUE_FUNCS(msg, kfree)
+DEFINE_QUEUE_PUSH1(msg, msg_node)
+DEFINE_QUEUE_POP_FUNC(msg, msg_node)
+
+DEFINE_BASE_QUEUE_FUNCS(req, req_node_free)
+DEFINE_QUEUE_PUSH2(req, req_node)
+DEFINE_QUEUE_POP_FUNC(req, req_node)
+
+DEFINE_BASE_QUEUE_FUNCS(ack, ack_node_free)
+DEFINE_QUEUE_PUSH2(ack, ack_node)
+DEFINE_QUEUE_POP_FUNC(ack, ack_node)

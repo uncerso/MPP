@@ -1,6 +1,6 @@
 #ifndef __mpp_kernel_module__
 #define __mpp_kernel_module__
-#include "mpp_queues.h"
+#include <net/inet_sock.h>
 
 struct mpphdr {
 	__u8	type;
@@ -36,11 +36,6 @@ struct handlers {
 
 struct id_ip {
 	__u32 ips[3];
-};
-
-struct handler_data {
-	struct tasks_queue q;
-	atomic_t cnt;
 };
 
 struct mpp_sock {

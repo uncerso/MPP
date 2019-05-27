@@ -11,6 +11,7 @@
 
 #include "mpp.h"
 #include "mpp_queues.h"
+#include "mpp_send_ack.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("uncerso");
@@ -18,6 +19,9 @@ MODULE_VERSION("1");
 
 #define PF_MPP 41
 #define IPPROTO_MPP 200
+
+extern struct req_queue glob_req_queue;
+extern struct ack_queue glob_ack_queue;
 
 struct sk_buff * (*ip_make_skb_mpp)(struct sock *sk,
 			    struct flowi4 *fl4,
@@ -34,7 +38,6 @@ static inline struct mpphdr *mpp_hdr(const struct sk_buff *skb) {
 }
 
 struct id_ip idip = {
-//	.ips = {2130706433u, 2130706433u, 2130706433u},
 	// .ips = {3232235625u, 3232235625u, 3232235625u},
 	.ips = {3232235624u, 3232235624u, 3232235624u},
 };
@@ -58,9 +61,13 @@ struct states * find_state_record(__u32 prog_id, int state) {
 	return sptr;
 }
 
-//struct tasks_queue recv_queue;
 struct msg_queue control_msg_queue;
 //==============================================
+struct handler_data {
+	struct tasks_queue q;
+	atomic_t cnt;
+};
+
 void handler_data_init(struct handler_data * hd) {
 	atomic_set(&hd->cnt, 0);
 	tasks_queue_init(&hd->q);
@@ -249,6 +256,10 @@ int mpp_sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size) {
 	char const * str = NULL;
 	struct mpp_sock * mppsk = cast_to_mpp_sock(sock->sk);
 	// printk(KERN_DEBUG "mpp_kernel: mpp_sock_sendmsg: start\n");
+	struct req_node * rn = make_req_node(NULL);
+	mod_timer(&rn->timer, jiffies+msecs_to_jiffies(1000));
+	req_queue_push(&glob_req_queue, rn);
+	goto out;
 
 	if (size < 1) {
 		printk(KERN_DEBUG "mpp_kernel: mpp_sock_sendmsg: msg too small\n");
@@ -482,7 +493,7 @@ int fill_the_path(void) {
 		printk(KERN_DEBUG "mpp_kernel: init: wtf1\n");
 		return -1;
 	}
-	handlers_head->state = make_state(sts[0], 0, handlers_types[i]);
+	handlers_head->state = make_state(sts[0], 0, handlers_types[0]);
 	sptr = handlers_head->state;
 	for (i = 1; i < sz; ++i) {
 		sptr->next = make_state(sts[i], i, handlers_types[i]);
@@ -529,6 +540,8 @@ static int __init mpp_kernel_init(void) {
 		handler_data_init(&handlers_storage[i]);
 
 	msg_queue_init(&control_msg_queue);
+	req_queue_init(&glob_req_queue);
+	ack_queue_init(&glob_ack_queue);
 	
 	printk(KERN_DEBUG "mpp_kernel: init: ok\n\n");
 	return 0;
@@ -562,6 +575,8 @@ static void __exit mpp_kernel_exit(void) {
 		handler_data_destroy(&handlers_storage[i]);
 
 	msg_queue_destroy(&control_msg_queue);
+	req_queue_destroy(&glob_req_queue);
+	ack_queue_destroy(&glob_ack_queue);
 	
 	printk(KERN_DEBUG "mpp_kernel: exit: ok\n\n");
 }

@@ -1,5 +1,5 @@
 NAME = MPP
-OBJS = mpp.o mpp_queues.o
+OBJS = mpp.o mpp_queues.o mpp_send_ack.o
 $(NAME)-objs += $(OBJS)
 obj-m += $(NAME).o
 
