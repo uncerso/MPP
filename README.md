@@ -1,2 +1,2 @@
-# NC
-Test NC implementation
+# MPP
+Test MPP implementation

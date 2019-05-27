@@ -1,8 +1,8 @@
-#ifndef __nc_kernel_module__
-#define __nc_kernel_module__
-#include "nc_queues.h"
+#ifndef __mpp_kernel_module__
+#define __mpp_kernel_module__
+#include "mpp_queues.h"
 
-struct nchdr {
+struct mpphdr {
 	__u8	type;
 	__u8	code;
 	__be16	loop_cnt;
@@ -43,7 +43,7 @@ struct handler_data {
 	atomic_t cnt;
 };
 
-struct nc_sock {
+struct mpp_sock {
 	//inet_sock should be first
 	struct inet_sock   inet;
 	int handler_type;

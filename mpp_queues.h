@@ -1,5 +1,5 @@
-#ifndef __nc_queues__
-#define __nc_queues__
+#ifndef __mpp_queues__
+#define __mpp_queues__
 #include <linux/mutex.h>
 #include <linux/wait.h>
 
