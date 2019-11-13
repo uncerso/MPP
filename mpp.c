@@ -77,9 +77,9 @@ void mpphdr_dump(struct mpphdr *mpph) {
 	printk(KERN_DEBUG "mpp_kernel: mpphdr_dump: prog_id = %u\n", ntohl(mpph->prog_id));
 	printk(KERN_DEBUG "mpp_kernel: mpphdr_dump: state = %u\n", ntohs(mpph->state));
 	printk(KERN_DEBUG "mpp_kernel: mpphdr_dump: flags = %u\n", ntohs(mpph->flags));
-	printk(KERN_DEBUG "mpp_kernel: mpphdr_dump: id = %lu\n", ntohl(mpph->id));
+	printk(KERN_DEBUG "mpp_kernel: mpphdr_dump: id = %d\n", ntohl(mpph->id));
 	printk(KERN_DEBUG "mpp_kernel: mpphdr_dump: total_len = %u\n", ntohl(mpph->total_len));
-	printk(KERN_DEBUG "mpp_kernel: mpphdr_dump: csum = %lu\n", ntohl(mpph->csum));
+	printk(KERN_DEBUG "mpp_kernel: mpphdr_dump: csum = %d\n", ntohl(mpph->csum));
 	printk(KERN_DEBUG "mpp_kernel: mpphdr_dump: last_cpoint_id = %u\n", ntohl(mpph->last_cpoint_id));
 }
 
@@ -103,7 +103,7 @@ struct handler_data handlers_storage[handler_id_size];
 // handlers
 void default_handler(struct sk_buff * skb, struct states * st) {
 	if (unlikely(st->handler_type < 0 || st->handler_type >= handler_id_size)) {
-		printk(KERN_WARNING "mpp_kernel: default_handler: incorrect handler type: \n", st->handler_type);
+		printk(KERN_WARNING "mpp_kernel: default_handler: incorrect handler type: %d\n", st->handler_type);
 		mpphdr_dump(mpp_hdr(skb));
 		kfree_skb(skb);
 	}
@@ -135,7 +135,7 @@ int mpp_sock_release(struct socket *sock) {
 	release_sock(sk);
 	sock_put(sk);
 	if (unlikely(handler_type < 0 || handler_type >= handler_id_size)) {
-		printk(KERN_ERR "mpp_kernel: mpp_sock_release: taint was detected! Socket was released with protocol = %\n", handler_type);
+		printk(KERN_ERR "mpp_kernel: mpp_sock_release: taint was detected! Socket was released with protocol = %d\n", handler_type);
 		goto out;
 	}
 	
@@ -420,7 +420,7 @@ int mpp_rcv(struct sk_buff *skb) {
 		if (likely(st))
 			st->handler(skb, st);
 		else {
-			printk(KERN_DEBUG "mpp_kernel: mpp_rcv: unknown program with (prog_id, state) = (%lu, %lu)\n", ntohl(hdr->prog_id), ntohs(hdr->state));
+			printk(KERN_DEBUG "mpp_kernel: mpp_rcv: unknown program with (prog_id, state) = (%d, %d)\n", ntohl(hdr->prog_id), ntohs(hdr->state));
 			mpphdr_dump(hdr);
 			kfree_skb(skb);
 		}
@@ -475,7 +475,7 @@ int fill_the_path(void) {
 	int const sz = 2;
 	int const sts[] = {0, 1};
 	int const handlers_types[] = {3, 4};
-	int i;
+	int i = 0;
 
 	handlers_head = make_prog();
 	if (!handlers_head) {
